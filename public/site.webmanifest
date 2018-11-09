@@ -1,0 +1,12 @@
+{
+    "short_name": "puttputtplanet",
+    "name": "Putt Putt Planet",
+    "icons": [{
+      "src": "icon.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }],
+    "start_url": "/?utm_source=homescreen",
+    "background_color": "#636363",
+    "theme_color": "#636363"
+  }

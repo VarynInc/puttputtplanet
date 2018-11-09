@@ -1,0 +1,31 @@
+body {
+	margin: 0px;
+	padding: 0px;
+	color: #ffffff;
+	background-color: #636363;
+	font-family: Arial, san-serif;
+}
+
+h1 {
+	color: rgb(231, 231, 231);
+}
+
+p {
+	margin: 10px;
+}
+
+.copyright {
+	color: rgb(184, 184, 184);
+	font-family: Arial, san-serif;
+	font-size: 8pt;
+}
+
+.poweredby {
+	color: rgb(184, 184, 184);
+	font-family: Arial, san-serif;
+	font-size: 8pt;
+}
+
+.varyn-logo-footer {
+	height: 3rem;
+}
