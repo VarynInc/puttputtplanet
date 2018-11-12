@@ -19,12 +19,12 @@ function setErrorReporting ($setFlag) {
 }
 setErrorReporting(true);
 require_once('LogMessage.php');
-$enginesisLogger = new LogMessage(array(
+$enginesisLogger = new LogMessage([
     'log_active' => true,
     'log_level' => LogMessageLevel::All,
     'log_to_output' => false,
     'log_to_file' => true
-));
+]);
 
 date_default_timezone_set('America/New_York');
 define('LOGFILE_PREFIX', 'puttputtplanet_php_');
@@ -69,7 +69,7 @@ setErrorReporting($serverStage != ''); // do not report errors on the Live serve
 require_once('version.php');
 require_once('config.php');
 
-$dbConnectionTable = array();
+$dbConnectionTable = [];
 $lastDBConnectionName = null;
 
 // ===============================================================================================
@@ -162,7 +162,7 @@ function encodeURLParams ($parameters) {
 }
 
 function decodeURLParams ($encodedURLParams) {
-    $parameters = array();
+    $parameters = [];
     $urlParams = explode('&', $encodedURLParams);
     $i = 0;
     while ($i < count($urlParams)) {
@@ -185,7 +185,7 @@ function saveQueryString ($parameters = null) {
 }
 
 function cleanXmlEntities ($string) {
-    return str_replace(array('&', '"', "'", '<', '>'), array('&amp;', '&quot;', '&apos;', '&lt;', '&gt;'), $string);
+    return str_replace(['&', '"', "'", '<', '>'], ['&amp;', '&quot;', '&apos;', '&lt;', '&gt;'], $string);
 }
 
 function getServiceProtocol () {
@@ -745,7 +745,7 @@ function siteDataFolder($site_id) {
 
 function enginesisParameterObjectMake ($fn, $site_id, $parameters) {
     global $sync_id;
-    $serverParams = array();
+    $serverParams = [];
     $serverParams['fn'] = $fn;
     $serverParams['site_id'] = $site_id;
     $serverParams['state_seq'] = ++ $sync_id;
@@ -903,22 +903,22 @@ function endsWith($haystack, $needle) {
  * @return string the transformed string.
  */
 function safeForHTML ($string) {
-    $htmlEscapeMap = array(
+    $htmlEscapeMap = [
         '&' => '&amp;',
         '<' => '&lt;',
         '>' => '&gt;',
         '"' => '&quot;',
         "'" => '&#x27;',
         '/' => '&#x2F;'
-    );
-    $htmlEscapePattern = array(
+    ];
+    $htmlEscapePattern = [
         '/&/',
         '/</',
         '/>/',
         '/"/',
         '/\'/',
         '/\//'
-    );
+    ];
     return preg_replace($htmlEscapePattern, $htmlEscapeMap, $string);
 }
 
@@ -1076,7 +1076,7 @@ function isValidPassword ($password) {
  * TODO: This should be localized, so move the possible names table into a lookup table.
  */
 function validateGender ($gender) {
-    $validGenders = array('Male', 'Female', 'Neutral');
+    $validGenders = ['Male', 'Female', 'Neutral'];
     $gender = trim($gender);
     if (strlen($gender) == 1) {
         $gender = strtoupper($gender);
@@ -1103,30 +1103,30 @@ function checkEmailAddress ($email) {
 
 function cleanString ($input) {
     // clean extended chars out of the string
-    $search = array(
+    $search = [
         '/[\x60\x82\x91\x92\xb4\xb8]/i',             // single quotes
         '/[\x84\x93\x94]/i',                         // double quotes
         '/[\x85]/i',                                 // ellipsis ...
         '/[\x00-\x0d\x0b\x0c\x0e-\x1f\x7f-\x9f]/i'   // all other non-ascii
-    );
-    $replace = array(
+    ];
+    $replace = [
         '\'',
         '"',
         '...',
         ''
-    );
+    ];
     return preg_replace($search, $replace, $input);
 }
 
 function cleanFilename ($filename) {
-    return str_replace(array('\\', '/', ':', '*', '?', '"', '<', '>', '|'), '', $filename);
+    return str_replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|'], '', $filename);
 }
 
-function strip_tags_attributes ($sSource, $aAllowedTags = array(), $aDisabledAttributes = array('onclick', 'ondblclick', 'onkeydown', 'onkeypress', 'onkeyup', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onunload')) {
-    if (empty($aDisabledEvents)) {
-        return strip_tags($sSource, implode('', $aAllowedTags));
+function strip_tags_attributes ($source, $allowedTags = [], $disabledAttributes = ['onclick', 'ondblclick', 'onkeydown', 'onkeypress', 'onkeyup', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onunload']) {
+    if (empty($disabledEvents)) {
+        return strip_tags($source, implode('', $allowedTags));
     } else {
-        return preg_replace('/<(.*?)>/ie', "'<' . preg_replace(array('/javascript:[^\"\']*/i', '/(" . implode('|', $aDisabledAttributes) . ")=[\"\'][^\"\']*[\"\']/i', '/\s+/'), array('', '', ' '), stripslashes('\\1')) . '>'", strip_tags($sSource, implode('', $aAllowedTags)));
+        return preg_replace('/<(.*?)>/ie', "'<' . preg_replace(array('/javascript:[^\"\']*/i', '/(" . implode('|', $disabledAttributes) . ")=[\"\'][^\"\']*[\"\']/i', '/\s+/'), array('', '', ' '), stripslashes('\\1')) . '>'", strip_tags($source, implode('', $allowedTags)));
     }
 }
 
@@ -2089,7 +2089,7 @@ function loginUrlMake ($site_id, $game_id = null) {
     global $redirect_urls;
     $url = $redirect_urls[$site_id]['login'];
     if ($site_id > 0 && $game_id > 0) {
-        $sql = dbQuery('select IF(length(trim(site_specific_game_id)) > 0 and site_specific_game_id > 0, site_specific_game_id, game_id) as game_id from site_games	where game_id = ? and site_id = ?', array($game_id, $site_id));
+        $sql = dbQuery('select IF(length(trim(site_specific_game_id)) > 0 and site_specific_game_id > 0, site_specific_game_id, game_id) as game_id from site_games	where game_id = ? and site_id = ?', [$game_id, $site_id]);
         $row = dbFetch($sql);
         if (isset($row)) {
             $game_id = $row['game_id'];
@@ -2222,7 +2222,7 @@ function setAccessControlHeader () {
         $http_origin = $request_headers['Origin'];
     }
     // TODO: Whitelist table: This table should come from the allowable site_ids in siteconfig.php "site_base_url"
-    $allowed_http_origins = array(
+    $allowed_http_origins = [
         'http://enginesis.com',
         'http://enginesis-l.com',
         'http://enginesis-d.com',
@@ -2240,7 +2240,7 @@ function setAccessControlHeader () {
         'http://killerquiz-d.com',
         'http://killerquiz-q.com',
         'http://localhost',
-    );
+    ];
     if (in_array($http_origin, $allowed_http_origins)){
         @header('Access-Control-Allow-Origin: ' . $http_origin);
     } else {
