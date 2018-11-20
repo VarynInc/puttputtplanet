@@ -1,79 +1,59 @@
-<?php // Enginesis common PHP functions. Usually include this or commonAdmin in any Enginesis PHP class or file.
-
+<?php
 /**
- * Turn on or off the PHP level error reporting. Typically we want this on for all servers except production.
- * @param $setFlag true to enable PHP error reporting, false to disable it.
+ * Common utility PHP functions for sites and services that communite with the Enginesis backend.
+ * This file defines the following globals:
+ *   SERVER_ROOT is the file path to the root of the web site file structure. 
+ *   $serverStage = -l, -q, -d,or '' for Live
+ *   $server = which enginesis server to converse with, full protocol/domain/url e.g. https://www.enginesis.com
+ *   $siteId = enginesis site_id for this website.
+ *   $enginesisServer = location/root URL of the enginesis server we are conversing with
+ *   $webServer = our (this) web server
+ *   $serverStage = the server stage we think we are
+ *   $isLoggedIn = true if the user is logged in
+ *   serverConfig.php holds server-specific configuration variables and is not to be checked in to version control.
  */
-function setErrorReporting ($setFlag) {
-    if ($setFlag) {
-        error_reporting(E_ALL);
-        ini_set('error_reporting', E_ALL);
-        ini_set("display_errors", 'On');
-        ini_set('html_errors', 'On');
-    } else {
-        error_reporting(0);
-        ini_set('error_reporting', 0);
-        ini_set("display_errors", 'Off');
-        ini_set('html_errors', 'Off');
-    }
-}
 setErrorReporting(true);
+session_start();
+require_once('version.php');
+require_once('serverConfig.php');
+require_once('Enginesis.php');
 require_once('LogMessage.php');
-$enginesisLogger = new LogMessage([
-    'log_active' => true,
-    'log_level' => LogMessageLevel::All,
-    'log_to_output' => false,
-    'log_to_file' => true
-]);
-
-date_default_timezone_set('America/New_York');
-define('LOGFILE_PREFIX', 'puttputtplanet_php_');
-define('SERVICES_REPLY_ENCRYPTED', false);
-define('COREG_TOKEN_KEY', 'DEAF39BB95AC1693');
-
-// determines where there is a secured writable area we can manipulate file storage
 if (isset($_SERVER['DOCUMENT_ROOT']) && strlen($_SERVER['DOCUMENT_ROOT']) > 0) {
-    $serverRootPath = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+    define('ROOTPATH', $_SERVER['DOCUMENT_ROOT'] . '/');
+    $serverRootPath = ROOTPATH . '../';
 } else {
-    $serverRootPath = '';
+    define('ROOTPATH', '../');
+    $serverRootPath = ROOTPATH;
 }
 define('SERVER_ROOT', $serverRootPath);
-define('SERVER_DATA_PATH', $serverRootPath . '..' . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR);
-define('SERVICE_ROOT', $serverRootPath . '..' . DIRECTORY_SEPARATOR . 'services' . DIRECTORY_SEPARATOR);
+define('SERVER_DATA_PATH', $serverRootPath . 'data/');
+define('SERVER_PRIVATE_PATH', $serverRootPath . 'private/');
+define('SERVICE_ROOT', $serverRootPath . 'services/');
+define('VIEWS_ROOT', $serverRootPath . 'services/views/');
 
-// access to our session data
-define('SESSION_DAYSTAMP_HOURS', 48);      // access tokens are good for 48 hours
-define('SESSION_REFRESH_HOURS', 4380);     // refresh tokens are good for 6 months
-define('SESSION_REFRESH_INTERVAL', 'P6M'); // refresh tokens are good for 6 months
-define('SESSION_COOKIE', 'pppsession');
-define('REFRESH_COOKIE', 'ppprefreshtoken');
-define('SESSION_HASH', 'cr');
-define('SESSION_AUTHTOKEN', 'authtok');
-define('SESSION_ADMIN_COOKIE', 'ppp_admin');
-define('SESSION_USERID_CACHE', 'ppp_userid');
-define('SESSION_USERNAME_CACHE', 'ppp_username');
-define('SESSION_PARAM_CACHE', 'pppsession_params');
-define('SESSION_USERINFO', 'pppsession_user');
-define('TIME_PERIOD_ORPHAN', 1); // time period to delete orphan upload files (in days)
-define('TIME_PERIOD_LAST_ACCESS', 1); // time period to delete upload files based on last access date (in months)
-define('CDN_CACHE_TYPE', 'Akamai'); // for Content Delivery Network cache control
-define('ACTIVE_DATABASE', 'enginesis'); // constants for database server access
-$serverName = isset($_SERVER['HTTP_X_FORWARDED_HOST']) ? $_SERVER['HTTP_X_FORWARDED_HOST'] : isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'puttputtplanet-l.com';
-$serverStage = '';
-preg_match('/-[d|l|q|x]./i', $serverName, $matched); // match any host that ends with -l., -d., -q., -x. if none of these assume a live stage
-if (count($matched) > 0) {
-    $serverStage = strtolower(str_replace('.', '', $matched[0]));
+/**
+ * @description
+ *   Turn on or off all error reporting. Typically we want this on for development, off for production.
+ * @param {bool} true to turn on error reporting, false to turn it off.
+ * @return {bool} just echos back the flag.
+ */
+function setErrorReporting ($reportingFlag) {
+    if ($reportingFlag) {
+        error_reporting(E_ALL);
+        ini_set('error_reporting', E_ALL);
+        ini_set('display_errors', 'On');
+        ini_set('html_errors', 'On');
+    } else {
+        error_reporting(E_ERROR);
+        ini_set('error_reporting', E_ERROR);
+        ini_set('display_errors', 'Off');
+        ini_set('html_errors', 'Off');
+    }
+    return $reportingFlag;
 }
-setErrorReporting($serverStage != ''); // do not report errors on the Live server
-
-require_once('version.php');
-require_once('config.php');
-
-$dbConnectionTable = [];
-$lastDBConnectionName = null;
 
 // ===============================================================================================
-//	Error logging and debugging functions. Note we are moving this to LogMessage/$enginesisLogger.
+//	Error logging and debugging functions. Depends on LogMessage/$enginesisLogger.
 // ===============================================================================================
 /**
  * This function would determine how to handle an error based on context and server.
@@ -83,7 +63,7 @@ $lastDBConnectionName = null;
  * @param string $fn The function name that generated the report.
  * @return string The message that was logged.
  */
-function reportError ($msg, $file = '', $line = 0, $fn = '') {
+function reportError($msg, $file = '', $line = 0, $fn = '') {
     global $enginesisLogger;
 
     if (strlen($file) == 0) {
@@ -99,23 +79,27 @@ function reportError ($msg, $file = '', $line = 0, $fn = '') {
     return $msg;
 }
 
-function dieIfNotLive ($msg) {
+function dieIfNotLive($msg) {
     global $enginesisLogger;
-    $enginesisLogger->log("dieIfNotLive $msg", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
     if ( ! isLive()) {
+        $enginesisLogger->log("dieIfNotLive $msg", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
         echo $msg;
         exit;
     }
 }
 
-function dieIfLive ($msg) {
+function dieIfLive($msg) {
     global $enginesisLogger;
-    $enginesisLogger->log("dieIfLive $msg", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
     if (isLive()) {
+        $enginesisLogger->log("dieIfLive $msg", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
         echo $msg;
         exit;
     }
 }
+
+// =================================================================
+// HTTP and client/server helper functions
+// =================================================================
 
 /**
  * Return the name of the page we are currently on.
@@ -124,31 +108,6 @@ function dieIfLive ($msg) {
 function currentPageName() {
     return basename($_SERVER['PHP_SELF'], '.php');
 }
-
-/**
- * Copy a key/value in the source array to the target if it does not already exist in the target array. Use the
- * force parameter to force the copy and overwrite the target value.
- * @param $source Array The source array to copy a key/value from.
- * @param $target Array the target array to copy the key/value to.
- * @param $key String The key to copy.
- * @param bool $force Set to true to force the value to the target if it exists or not.
- * @return bool true if a copy was done, false if no copy was done.
- */
-function copyArrayKey($source, & $target, $key, $force = false) {
-    $copied = false;
-    if ( ! isset($target[$key]) && isset($source[$key])) {
-        $target[$key] = $source[$key];
-        $copied = true;
-    } elseif (isset($source[$key]) && $force) {
-        $target[$key] = $source[$key];
-        $copied = true;
-    }
-    return $copied;
-}
-
-// =================================================================
-// HTTP and client/server helper functions
-// =================================================================
 
 function encodeURLParams ($parameters) {
     $encodedURLParams = '';
@@ -162,7 +121,7 @@ function encodeURLParams ($parameters) {
 }
 
 function decodeURLParams ($encodedURLParams) {
-    $parameters = [];
+    $parameters = array();
     $urlParams = explode('&', $encodedURLParams);
     $i = 0;
     while ($i < count($urlParams)) {
@@ -185,7 +144,7 @@ function saveQueryString ($parameters = null) {
 }
 
 function cleanXmlEntities ($string) {
-    return str_replace(['&', '"', "'", '<', '>'], ['&amp;', '&quot;', '&apos;', '&lt;', '&gt;'], $string);
+    return str_replace(array('&', '"', "'", '<', '>'), array('&amp;', '&quot;', '&apos;', '&lt;', '&gt;'), $string);
 }
 
 function getServiceProtocol () {
@@ -242,6 +201,35 @@ function getPostVar ($varName, $defaultValue = NULL) {
 }
 
 /**
+ * processTrackBack: process a possible track back request when a page loads.
+ * @param e: the event we are tracking, such as "Clicked Logo". While these are arbitrary, we should try to use
+ *     the same value for the same event across all pages. Where are these id's documented?
+ * @param u: the anonymous userId who generated the event.
+ * @param: i: which newsletter this event came from.
+ *
+ * This data gets recorded in the database to be processed later.
+ *
+ */
+function processTrackBack () {
+    global $enginesis;
+    $event = getPostOrRequestVar('e', '');
+    $userId = getPostOrRequestVar('u', '');
+    $newsletterId = getPostOrRequestVar('i', '');
+    if ($newsletterId == '') {
+        $newsletterId = getPostOrRequestVar('id', '');
+    }
+    if ($event != '' && $userId != '' && $newsletterId != '') {
+        if (isset($_SERVER['HTTP_REFERER'])) {
+            $url = parse_url($_SERVER['HTTP_REFERER']);
+            $referrer = $url['host'];
+        } else {
+            $referrer = 'varyn.com';
+        }
+        $enginesis->newsletterTrackingRecord($userId, $newsletterId, $event, '', $referrer);
+    }
+}
+
+/**
  * The blowfish encryption algorithm requires data length is a multiple of 8 bytes. This
  * function pads the string to the nearest 8 byte boundary.
  */
@@ -293,8 +281,6 @@ function encryptString($data, $key) {
         $key = str_repeat($key, ceil(16/$keyLength));
     }
     return base64URLEncode(openssl_encrypt(blowfishPad($data), 'BF-ECB', pack('H*', $key), OPENSSL_RAW_DATA | OPENSSL_NO_PADDING));
-
-    // return base64URLEncode(mcrypt_encrypt(MCRYPT_BLOWFISH, pack('H*', $key), blowfishPad($data), MCRYPT_MODE_ECB, pack('H*', '0000000000000000')));
 }
 
 /**
@@ -309,8 +295,6 @@ function decryptString($data, $key) {
         $key = str_repeat($key, ceil(16/$keyLength));
     }
     return blowfishUnpad(openssl_decrypt(base64URLDecode($data), 'BF-ECB', pack('H*', $key), OPENSSL_RAW_DATA | OPENSSL_NO_PADDING));
-
-    // return blowfishUnpad(mcrypt_decrypt(MCRYPT_BLOWFISH, pack('H*', $key), base64URLDecode($data), MCRYPT_MODE_ECB, pack('H*', '0000000000000000')));
 }
 
 /**
@@ -398,7 +382,6 @@ function getURLContents ($url, $get_params = null, $post_params = null) {
  * @param $serverURL string is the URL to contact without any query string (use $paramArray)
  * @param $paramArray array key => value array of parameters e.g. array('site_id' => 100);
  * @return array|mixed|string response from server or null if failed.
- * TODO: This needs to handle HTTPS.
  */
 function callEnginesisAPI ($fn, $serverURL, $paramArray) {
     if ( ! isset($paramArray['response'])) {
@@ -411,26 +394,56 @@ function callEnginesisAPI ($fn, $serverURL, $paramArray) {
     if ( ! isset($paramArray['fn'])) {
         $paramArray['fn'] = $fn;
     }
-    $ch = curl_init();
+    $response = $parameters['response'];
+    $setSSLCertificate = false;
+    $isLocalhost = serverStage() == '-l';
+    $setSSLCertificate = startsWith(strtolower($serverURL), 'https://');
+    $ch = curl_init($serverURL);
     if ($ch) {
-        curl_setopt($ch, CURLOPT_URL, $serverURL);
+        $referrer = serverName() . currentPagePath();
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Enginesis PHP SDK');
+        curl_setopt($ch, CURLOPT_REFERER, $referrer);
         curl_setopt($ch, CURLOPT_HEADER, 0);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_COOKIEJAR, 'cookie.txt');
-        curl_setopt($ch, CURLOPT_COOKIEFILE, 'cookie.txt');
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, encodeURLParams($paramArray));
-        $contents = curl_exec($ch);
-        curl_close($ch);
-        $succeeded = strlen($contents) > 0;
-        // TODO: We should verify the response is a valid EnginesisReponse object
-        if ( ! $succeeded) {
-            $contents = makeErrorResponse('SYSTEM_ERROR', 'System error: ' . $serverURL . ' replied with no data.', $response, $paramArray);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+        curl_setopt($ch, CURLOPT_DNS_CACHE_TIMEOUT, 600);
+        if ($isLocalhost) {
+            curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 );
         }
+        if ($setSSLCertificate) {
+            $certPath = $this->m_serverPaths['PRIVATE'] . 'cacert.pem';
+            if (file_exists($certPath)) {
+                curl_setopt($ch, CURLOPT_CAINFO, $certPath);
+                curl_setopt($ch, CURLOPT_CAPATH, $certPath);
+            } else {
+                reportError("callServerAPI Cant locate private certs $certPath", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+            }
+        }
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $this->encodeURLParams($parameters));
+        $contents = curl_exec($ch);
+        $succeeded = strlen($contents) > 0;
+        if ( ! $succeeded) {
+            $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. ' . curl_error($ch);
+            reportError($errorInfo, __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+            $contents = makeErrorResponse('SYSTEM_ERROR', $errorInfo, $response, $paramArray);
+        }
+        curl_close($ch);
     } else {
         $contents = makeErrorResponse('SYSTEM_ERROR', 'System error: unable to contact ' . $serverURL . ' or the server did not respond.', $response, $paramArray);
     }
-    return $contents;
+    if ($debug) {
+        reportError("callServerAPI response from $fn: $contents", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+    }
+    if ($response == 'json') {
+        $contentsObject = json_decode($contents);
+        // TODO: We should verify the response is a valid EnginesisReponse object
+        if ($contentsObject == null) {
+            reportError("callServerAPI could not parse JSON into an object: $contents", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+        }
+    }
+    return $contentsObject;
 }
 
 // =================================================================
@@ -503,8 +516,12 @@ function verifyStage($includePassedTests = false) {
 
     // verify Logger is working
     $test = 'logger';
-    $enginesisLogger->log("Validating stage", LogMessageLevel::Info, 'Sys', __FILE__, __LINE__);
-    $isValid = $enginesisLogger->isValid();
+    if (isset($enginesisLogger) && $enginesisLogger != null) {
+        $enginesisLogger->log("Validating stage", LogMessageLevel::Info, 'Sys', __FILE__, __LINE__);
+        $isValid = $enginesisLogger->isValid();
+    } else {
+        $isValid = false;
+    }
     if ( ! $isValid || ($isValid && $includePassedTests)) {
         $testStatus[$test] = $isValid;
     }
@@ -512,8 +529,8 @@ function verifyStage($includePassedTests = false) {
 }
 
 /**
- * Return the host name of the server we are running o. e.g. www.enginesis-q.com
- * @return string
+ * Return the host name of the server we are running on. e.g. www.enginesis-q.com
+ * @return string server host name only, e.g. www.enginesis.com.
  */
 function serverName () {
     $serverName = isset($_SERVER['HTTP_X_FORWARDED_HOST']) ? $_SERVER['HTTP_X_FORWARDED_HOST'] : isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'enginesis-l.com';
@@ -604,23 +621,18 @@ function domainForTargetPlatform ($targetPlatform) {
 }
 
 /**
- * Return just the -l, -d, -q, -x part, or '' for live, from the current host name.
- * @param null $hostName
- * @return string
+ * Parse the given host name to determine which stage we are currently running on. Return just
+ *   the -l, -d, -q, -x part, or '' for live.
+ * @param $hostName string - host name or domain name to parse. If null we try the current serverName().
+ * @return string: server host name only, e.g. www.enginesis.com.
  */
 function serverStage ($hostName = null) {
     $targetPlatform = ''; // assume live until we prove otherwise
     if (strlen($hostName) == 0) {
         $hostName = serverName();
     }
-    if (strpos($hostName, '-l.') >= 2) {
-        $targetPlatform = '-l';
-    } elseif (strpos($hostName, '-d.') >= 2) {
-        $targetPlatform = '-d';
-    } elseif (strpos($hostName, '-q.') >= 2) {
-        $targetPlatform = '-q';
-    } elseif (strpos($hostName, '-x.') >= 2) {
-        $targetPlatform = '-x';
+    if (preg_match('/-[dlqx]\./i', $hostName, $matchedStage)) {
+        $targetPlatform = substr($matchedStage[0], 0, 2);
     }
     return $targetPlatform;
 }
@@ -745,7 +757,7 @@ function siteDataFolder($site_id) {
 
 function enginesisParameterObjectMake ($fn, $site_id, $parameters) {
     global $sync_id;
-    $serverParams = [];
+    $serverParams = array();
     $serverParams['fn'] = $fn;
     $serverParams['site_id'] = $site_id;
     $serverParams['state_seq'] = ++ $sync_id;
@@ -789,6 +801,72 @@ function randomString ($length, $maxCodePoint = 32, $reseed = false) {
         $i++;
     }
     return $string;
+}
+
+/**
+ * Create a token that is good on this server for 30 minutes. We use this token in sensitive input forms
+ * to not accept input after this expiration time.
+ * @return string the token the form should return.
+ */
+function makeInputFormHackerToken () {
+    global $enginesis;
+    $expirationTime = 30;
+    $hackerToken = md5($enginesis->getServerName()) . '' . floor(time() / ($expirationTime * 60));
+    return $hackerToken;
+}
+
+/**
+ * Given a token from an input form check to verify it has not yet expired.
+ * @param $token generated with makeInputFormHackerToken.
+ * @return boolean true when the token is good.
+ */
+function validateInputFormHackerToken ($token) {
+    return makeInputFormHackerToken() == $token;
+}
+
+/**
+ * We cache the logged in user object locally so we have the user data at our disposal without going back to the server.
+ * @param $userInfo
+ * @param $domain
+ */
+function setSiteUserCookie ($userInfo, $domain) {
+    // $userInfo Object ( [user_id] => 10239 [site_id] => 106 [user_name] => Varyn [real_name] => Varyn [site_user_id] => [network_id] => 1 [dob] => 2004-02-16 [gender] => F [city] => [state] => [zipcode] => [country_code] => [email_address] => john@varyn.com [mobile_number] => [im_id] => [agreement] => 1 [img_url] => [about_me] => [date_created] => 2016-02-16 20:47:45 [date_updated] => [source_site_id] => 106 [last_login] => 2016-02-20 22:27:38 [login_count] => 34 [tagline] => [additional_info] => [reg_confirmed] => 1 [user_status_id] => 1 [site_currency_value] => 0 [site_experience_points] => 0 [view_count] => 0 [access_level] => 10 [role_name] => [user_rank] => 10001 [session_id] => cecfe3b4b5dac00d464eff98ba5c75c3 [cr] => d2a1bae6ef968501b648ccf253451a1a [authtok] => Dk39dEasNBgO79Mp0gjXnvGYBEPP06d5Pd KmpdvCnVEehliQpl5eezAdVfc9t9xsE7RDp5i9rPDjj73TXxaW1XOrVjWHwZsnQ0q/GsHtWl4tDGgS/lTMA== )
+    $userInfoJSON = json_encode($userInfo);
+    $_COOKIE[SITE_SESSION_COOKIE] = $userInfoJSON;
+    setcookie(SITE_SESSION_COOKIE, $userInfoJSON, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $domain);
+    debugLog('setSiteUserCookie ' . $userInfoJSON);
+}
+
+function getSiteUserCookie () {
+    return isset($_COOKIE[SITE_SESSION_COOKIE]) ? $_COOKIE[SITE_SESSION_COOKIE] : null;
+}
+
+function getSiteUserCookieObject () {
+    $userInfo = null;
+    $userInfoJSON = getSiteUserCookie();
+    if ($userInfoJSON != null) {
+        $userInfo = json_decode($userInfoJSON);
+    }
+    return $userInfo;
+}
+
+function clearSiteUserCookie ($domain) {
+    $_COOKIE[SITE_SESSION_COOKIE] = null;
+    setcookie(SITE_SESSION_COOKIE, null, time() - 86400, '/', $domain);
+}
+
+/**
+ * Helper function to determine if the current session is valid. What we are looking for:
+ *   1. User id and token exist
+ *   2. user id matches token
+ *   3. not expired
+ * @param $userId
+ * @param $token
+ * @return bool
+ */
+function verifySessionIsValid($userId, $token) {
+    // TODO: We need to write the code for this!
+    return true;
 }
 
 /**
@@ -843,6 +921,27 @@ function arrayToString ($array) {
     } else {
         return '[null]';
     }
+}
+
+/**
+ * Copy a key/value in the source array to the target if it does not already exist in the target array. Use the
+ * force parameter to force the copy and overwrite the target value.
+ * @param $source Array The source array to copy a key/value from.
+ * @param $target Array the target array to copy the key/value to.
+ * @param $key String The key to copy.
+ * @param bool $force Set to true to force the value to the target if it exists or not.
+ * @return bool true if a copy was done, false if no copy was done.
+ */
+function copyArrayKey($source, & $target, $key, $force = false) {
+    $copied = false;
+    if ( ! isset($target[$key]) && isset($source[$key])) {
+        $target[$key] = $source[$key];
+        $copied = true;
+    } elseif (isset($source[$key]) && $force) {
+        $target[$key] = $source[$key];
+        $copied = true;
+    }
+    return $copied;
 }
 
 /**
@@ -903,22 +1002,22 @@ function endsWith($haystack, $needle) {
  * @return string the transformed string.
  */
 function safeForHTML ($string) {
-    $htmlEscapeMap = [
+    $htmlEscapeMap = array(
         '&' => '&amp;',
         '<' => '&lt;',
         '>' => '&gt;',
         '"' => '&quot;',
         "'" => '&#x27;',
         '/' => '&#x2F;'
-    ];
-    $htmlEscapePattern = [
+    );
+    $htmlEscapePattern = array(
         '/&/',
         '/</',
         '/>/',
         '/"/',
         '/\'/',
         '/\//'
-    ];
+    );
     return preg_replace($htmlEscapePattern, $htmlEscapeMap, $string);
 }
 
@@ -965,6 +1064,32 @@ function strpos_array ($haystack, $needles, $offset = 0) {
         }
     }
     return count($matches) == 0 ? false : min($matches);
+}
+
+/**
+ * Convert a boolean value to a string.
+ * @param $variable
+ * @return string
+ */
+function boolToString($variable) {
+    return $variable ? 'true' : 'false';
+}
+
+/**
+ * Convert a value to its boolean representation.
+ * @param $variable - any type will be coerced to a boolean value.
+ * @return boolean
+ */
+function valueToBoolean($variable) {
+    if (is_string($variable)) {
+        $variable = strtoupper($variable);
+        $result =  $variable == '1' || $variable == 'Y' || $variable == 'T' || $variable == 'YES' || $variable == 'TRUE' || $variable == 'CHECKED';
+    } elseif (is_numeric($variable)) {
+        $result = ! ! $variable;
+    } else {
+        $result = $variable != null;
+    }
+    return $result;
 }
 
 /**
@@ -1076,7 +1201,7 @@ function isValidPassword ($password) {
  * TODO: This should be localized, so move the possible names table into a lookup table.
  */
 function validateGender ($gender) {
-    $validGenders = ['Male', 'Female', 'Neutral'];
+    $validGenders = array('Male', 'Female', 'Neutral');
     $gender = trim($gender);
     if (strlen($gender) == 1) {
         $gender = strtoupper($gender);
@@ -1103,30 +1228,30 @@ function checkEmailAddress ($email) {
 
 function cleanString ($input) {
     // clean extended chars out of the string
-    $search = [
+    $search = array(
         '/[\x60\x82\x91\x92\xb4\xb8]/i',             // single quotes
         '/[\x84\x93\x94]/i',                         // double quotes
         '/[\x85]/i',                                 // ellipsis ...
         '/[\x00-\x0d\x0b\x0c\x0e-\x1f\x7f-\x9f]/i'   // all other non-ascii
-    ];
-    $replace = [
+    );
+    $replace = array(
         '\'',
         '"',
         '...',
         ''
-    ];
+    );
     return preg_replace($search, $replace, $input);
 }
 
 function cleanFilename ($filename) {
-    return str_replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|'], '', $filename);
+    return str_replace(array('\\', '/', ':', '*', '?', '"', '<', '>', '|'), '', $filename);
 }
 
-function strip_tags_attributes ($source, $allowedTags = [], $disabledAttributes = ['onclick', 'ondblclick', 'onkeydown', 'onkeypress', 'onkeyup', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onunload']) {
-    if (empty($disabledEvents)) {
-        return strip_tags($source, implode('', $allowedTags));
+function strip_tags_attributes ($sSource, $aAllowedTags = array(), $aDisabledAttributes = array('onclick', 'ondblclick', 'onkeydown', 'onkeypress', 'onkeyup', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onunload')) {
+    if (empty($aDisabledEvents)) {
+        return strip_tags($sSource, implode('', $aAllowedTags));
     } else {
-        return preg_replace('/<(.*?)>/ie', "'<' . preg_replace(array('/javascript:[^\"\']*/i', '/(" . implode('|', $disabledAttributes) . ")=[\"\'][^\"\']*[\"\']/i', '/\s+/'), array('', '', ' '), stripslashes('\\1')) . '>'", strip_tags($source, implode('', $allowedTags)));
+        return preg_replace('/<(.*?)>/ie', "'<' . preg_replace(array('/javascript:[^\"\']*/i', '/(" . implode('|', $aDisabledAttributes) . ")=[\"\'][^\"\']*[\"\']/i', '/\s+/'), array('', '', ' '), stripslashes('\\1')) . '>'", strip_tags($sSource, implode('', $aAllowedTags)));
     }
 }
 
@@ -1152,7 +1277,7 @@ function profanityFilter (&$strTest) {
  * @param $includeTime boolean include the time in the return value.
  * @return string a valid MySQL date
  */
-function DateToMySQLDate ($phpDate, $includeTime = true) {
+function dateToMySQLDate ($phpDate, $includeTime = true) {
     if ($includeTime) {
         $mySQLDateFormat = 'Y-m-d H:i:s';
     } else {
@@ -1174,6 +1299,11 @@ function MySQLDateToDate ($mysqlDate) {
     return strtotime($mysqlDate);
 }
 
+/**
+ * Given a MySQL date string return a human readable date string.
+ * @param $date
+ * @return bool|string
+ */
 function MySQLDateToHumanDate ($mysqlDate) {
     // MySQL date is YYYY-mm-dd convert it to mm/dd/yyyy
     return substr($mysqlDate, 5, 2) . '/' . substr($mysqlDate, 8, 2) . '/' . substr($mysqlDate, 0, 4);
@@ -1236,6 +1366,26 @@ function rgbToHex($rgb) {
         return sprintf("#%02x%02x%02x", $rgb[0], $rgb[1], $rgb[2]);
     }
     return '#000000';
+}
+
+/**
+ * @function: ageFromDate: Determine age (number of years) since date.
+ * @param {date} Date to calculate age from.
+ * @param {date} Date to calculate age to, default is today.
+ * @return int number of years from date to today.
+ */
+function ageFromDate ($checkDate, $referenceDate = null) {
+    $timestamp = strtotime($checkDate);
+    if ($referenceDate == null) {
+        $referenceDateTime = time();
+    } else {
+        $referenceDateTime = strtotime($referenceDate);
+    }
+    $years = date("Y", $referenceDateTime) - date("Y", $timestamp);
+    if (date("md", $timestamp) > date("md", $referenceDateTime)) {
+        $years --;
+    }
+    return $years;
 }
 
 // =================================================================
@@ -2089,7 +2239,7 @@ function loginUrlMake ($site_id, $game_id = null) {
     global $redirect_urls;
     $url = $redirect_urls[$site_id]['login'];
     if ($site_id > 0 && $game_id > 0) {
-        $sql = dbQuery('select IF(length(trim(site_specific_game_id)) > 0 and site_specific_game_id > 0, site_specific_game_id, game_id) as game_id from site_games	where game_id = ? and site_id = ?', [$game_id, $site_id]);
+        $sql = dbQuery('select IF(length(trim(site_specific_game_id)) > 0 and site_specific_game_id > 0, site_specific_game_id, game_id) as game_id from site_games	where game_id = ? and site_id = ?', array($game_id, $site_id));
         $row = dbFetch($sql);
         if (isset($row)) {
             $game_id = $row['game_id'];
@@ -2212,64 +2362,26 @@ function showBooleanChecked($flag) {
         return '';
     }
 }
-    /**
-     * Set the CORS access control header. For now we allow anyone to access our resources. We may decide to change
-     * this policy to a whitelist.
-     */
-function setAccessControlHeader () {
-/*    $request_headers = apache_request_headers();
-    if (isset($request_headers['Origin'])) {
-        $http_origin = $request_headers['Origin'];
-    }
-    // TODO: Whitelist table: This table should come from the allowable site_ids in siteconfig.php "site_base_url"
-    $allowed_http_origins = [
-        'http://enginesis.com',
-        'http://enginesis-l.com',
-        'http://enginesis-d.com',
-        'http://enginesis-q.com',
-        'http://varyn.com',
-        'http://varyn-l.com',
-        'http://varyn-d.com',
-        'http://varyn-q.com',
-        'http://jumpydot.com',
-        'http://jumpydot-l.com',
-        'http://jumpydot-d.com',
-        'http://jumpydot-q.com',
-        'http://killerquiz.com',
-        'http://killerquiz-l.com',
-        'http://killerquiz-d.com',
-        'http://killerquiz-q.com',
-        'http://localhost',
-    ];
-    if (in_array($http_origin, $allowed_http_origins)){
-        @header('Access-Control-Allow-Origin: ' . $http_origin);
-    } else {
-        @header('Access-Control-Allow-Origin: ' . $http_origin);
-    }
-*/
-    switch($_POST['response']) {
-        case 'json':
-            $contentType = 'application/json';
-            break;
-        case 'xml':
-            $contentType = 'text/xml';
-            break;
-        default:
-            $contentType = 'text/html';
-            break;
-    }
-    header("Access-Control-Allow-Origin: *");
-    header('Access-Control-Allow-Methods: GET, POST');
-    header('Content-Type: ' . $contentType);
-    header('Server: Enginesis');
-}
 
-/**
- * Log a mail message so we can track outbound emails. This function is designed to be sent into
- * the EnginesisMailer log function.
- * @param $infoMessage
- */
-function logMailSent ($infoMessage) {
-    global $enginesisLogger;
-    $enginesisLogger->log("Mail sent $infoMessage", LogMessageLevel::Info, 'Mail', __FILE__, __LINE__);
+// "Global" PHP variables available to all scripts. See also serverConfig.php.
+$enginesisLogger = new LogMessage(array(
+    'log_active' => true,
+    'log_level' => LogMessageLevel::All,
+    'log_to_output' => false,
+    'log_to_file' => true
+));
+$page = '';
+$webServer = '';
+$enginesis = new Enginesis($siteId, null, $developerKey);
+$serverName = $enginesis->getServerName();
+$serverStage = $enginesis->getServerStage();
+setErrorReporting($serverStage != ''); // turn on errors for all stages except LIVE TODO: Remove from above when we are going live.
+$isLoggedIn = $enginesis->isLoggedInUser();
+if ($isLoggedIn) {
+    $userId = $enginesis->getUserId();
+    $authToken = $enginesis->getAuthToken();
+} else {
+    $userId = 0;
+    $authToken = '';
 }
+processTrackBack();

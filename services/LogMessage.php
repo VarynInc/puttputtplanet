@@ -60,7 +60,10 @@ class LogMessage
      * @return string
      */
     private static function _defaultFilePrefix () {
-        return 'enginesis_php_';
+        if ( ! defined('LOGFILE_PREFIX')) {
+            define('LOGFILE_PREFIX', 'enginesis_php_');
+        }
+        return LOGFILE_PREFIX;
     }
 
     /**
