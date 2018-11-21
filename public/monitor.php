@@ -126,8 +126,4 @@ if ($pageok) {
     }
 }
 
-if ($pageok) {
-    echo 'PAGEOK';
-} else {
-    echo 'ERROR';
-}
+echo($pageok ? 'PAGEOK' : 'ERROR');
