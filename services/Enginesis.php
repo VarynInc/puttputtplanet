@@ -173,6 +173,17 @@ abstract class EnginesisRefreshStatus {
         }
 
         /**
+         * Create a failed response for cases when we are going to fail locally without transaction
+         * with the server.
+         */
+        private function makeErrorResponse($errorCode, $errorMessage, $parameters) {
+            $service = isset($parameters['fn']) ? $parameters['fn'] : 'UNKNOWN';
+            $stateSequence = isset($parameters['stateSeq']) ? $parameters['stateSeq'] : 0;
+            $enginesisResponse = '{"results":{"status":{"success":"0","message":"' . $errorCode . '","extended_info":"' . $errorMessage . '"},"passthru":{"fn":"' . $service . '","state_seq":' . $stateSequence . '}}}';
+            return $enginesisResponse;
+        }
+
+        /**
          * Return the version of this Enginesis library.
          * @return string version identifier
          */
@@ -1177,11 +1188,12 @@ abstract class EnginesisRefreshStatus {
                 if ( ! $succeeded) {
                     $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. ' . curl_error($ch);
                     $this->debugLog($errorInfo);
-                    $contents = '{"results":{"status":{"success":"0","message":"SYSTEM_ERROR","extended_info":"' . $errorInfo . '"},"passthru":{"fn":"' . $fn . '","state_seq":0}}}';
+                    $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
                 }
                 curl_close($ch);
             } else {
-                $contents = '{"results":{"status":{"success":"0","message":"SYSTEM_ERROR","extended_info":"System error: unable to contact ' . $this->m_serviceEndPoint . ' or the server did not respond."},"passthru":{"fn":"' . $fn . '","state_seq":0}}}';
+                $errorInfo = 'System error: unable to contact ' . $this->m_serviceEndPoint . ' or the server did not respond.';
+                $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
             }
             if ($debug) {
                 $this->debuLog("callServerAPI response from $fn: $contents");
@@ -1908,9 +1920,9 @@ abstract class EnginesisRefreshStatus {
                 if ($userId < 9999) {
                     $userId = $this->m_userId;
                 }
-                $enginesisResponse = $this->callServerAPI('UserGet', array('get_user_id' => $userId));
+                $enginesisResponse = $this->callServerAPI('UserGet', ['get_user_id' => $userId]);
             } elseif ($this->isValidUserName($userId)) {
-                $enginesisResponse = $this->callServerAPI('UserGetByName', array('user_name' => $userId));
+                $enginesisResponse = $this->callServerAPI('UserGetByName', ['user_name' => $userId]);
             }
             $results = $this->setLastErrorFromResponse($enginesisResponse);
             if ($results != null && is_array($results)) {
