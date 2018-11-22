@@ -29,7 +29,7 @@ define('SERVER_ROOT', $serverRootPath);
 define('SERVER_DATA_PATH', $serverRootPath . 'data/');
 define('SERVER_PRIVATE_PATH', $serverRootPath . 'private/');
 define('SERVICE_ROOT', $serverRootPath . 'services/');
-define('VIEWS_ROOT', $serverRootPath . 'services/views/');
+define('VIEWS_ROOT', $serverRootPath . 'views/');
 
 /**
  * @description
@@ -95,6 +95,17 @@ function dieIfLive($msg) {
         echo $msg;
         exit;
     }
+}
+
+/**
+ * Create a failed response for cases when we are going to fail locally without transaction
+ * with the server.
+ */
+function makeErrorResponse($errorCode, $errorMessage, $parameters) {
+    $service = isset($parameters['fn']) ? $parameters['fn'] : 'UNKNOWN';
+    $stateSequence = isset($parameters['stateSeq']) ? $parameters['stateSeq'] : 0;
+    $contents = '{"results":{"status":{"success":"0","message":"' . $errorCode . '","extended_info":"' . $errorMessage . '"},"passthru":{"fn":"' . $service . '","state_seq":' . $stateSequence . '}}}';
+    return $response;
 }
 
 // =================================================================
@@ -417,7 +428,7 @@ function callEnginesisAPI ($fn, $serverURL, $paramArray) {
                 curl_setopt($ch, CURLOPT_CAINFO, $certPath);
                 curl_setopt($ch, CURLOPT_CAPATH, $certPath);
             } else {
-                reportError("callServerAPI Cant locate private certs $certPath", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+                reportError("callEnginesisAPI Cant locate private certs $certPath", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
             }
         }
         curl_setopt($ch, CURLOPT_POST, 1);
@@ -427,11 +438,11 @@ function callEnginesisAPI ($fn, $serverURL, $paramArray) {
         if ( ! $succeeded) {
             $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. ' . curl_error($ch);
             reportError($errorInfo, __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
-            $contents = makeErrorResponse('SYSTEM_ERROR', $errorInfo, $response, $paramArray);
+            $contents = makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
         }
         curl_close($ch);
     } else {
-        $contents = makeErrorResponse('SYSTEM_ERROR', 'System error: unable to contact ' . $serverURL . ' or the server did not respond.', $response, $paramArray);
+        $contents = makeErrorResponse('SYSTEM_ERROR', 'System error: unable to contact ' . $serverURL . ' or the server did not respond.', $parameters);
     }
     if ($debug) {
         reportError("callServerAPI response from $fn: $contents", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);

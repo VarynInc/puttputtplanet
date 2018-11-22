@@ -337,6 +337,7 @@ class LogMessage
     public function logVar ($value, $level = LogMessageLevel::Info, $subsystem = null, $sourceFile = null, $lineNumber = null) {
         $message = var_export($value, true);
         $this->log($message, $level, $subsystem, $sourceFile, $lineNumber);
+        return $message;
     }
 
     /**
@@ -389,4 +390,20 @@ class LogMessage
     public function isValid() {
         return $this->_isValid;
     }
+
+    /**
+     * Immediately display a variable and a log message in the output stream.
+     * @param any $variable A PHP variable to display.
+     * @param string $message A message to give context to the debug reason.
+     */
+    static function logImmediate($variable, $message = null) {
+        if ( ! isset($message) || $message == null) {
+            $caller = debug_backtrace()[0];
+            $message = 'From ' . basename($caller['file']) . ':' . $caller['line'];
+        }
+        echo("<div><h3>$message</h3>");
+        echo '<pre>';
+        echo(var_export($variable, true));
+        echo '</pre></div>';
+    }    
 }

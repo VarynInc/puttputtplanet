@@ -1184,7 +1184,7 @@ abstract class EnginesisRefreshStatus {
                 curl_setopt($ch, CURLOPT_POST, 1);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, $this->encodeURLParams($parameters));
                 $contents = curl_exec($ch);
-                $succeeded = strlen($contents) > 0;
+                $succeeded = $contents !== false && strlen($contents) > 0;
                 if ( ! $succeeded) {
                     $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. ' . curl_error($ch);
                     $this->debugLog($errorInfo);
@@ -1200,12 +1200,13 @@ abstract class EnginesisRefreshStatus {
             }
             if ($response == 'json') {
                 $contentsObject = json_decode($contents);
-                // TODO: We should verify the response is a valid EnginesisReponse object
                 if ($contentsObject == null) {
-                    $this->debugLog("callServerAPI could not parse JSON into an object: $contents");
+                    $this->debugLog("callServerAPI could not parse server response as JSON: $contents");
                 }
+                return $contentsObject;
+            } else {
+                return $contents;
             }
-            return $contentsObject;
         }
 
         /**

@@ -61,7 +61,7 @@ $errorCodeTable = array (
  * @param $status_msg
  * @return mixed
  */
-function errorToLocalString ($status_msg) {
+function errorToLocalString($status_msg) {
     global $errorCodeTable;
     global $language_code;
 
