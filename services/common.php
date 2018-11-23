@@ -20,7 +20,7 @@ require_once('Enginesis.php');
 require_once('LogMessage.php');
 if (isset($_SERVER['DOCUMENT_ROOT']) && strlen($_SERVER['DOCUMENT_ROOT']) > 0) {
     define('ROOTPATH', $_SERVER['DOCUMENT_ROOT'] . '/');
-    $serverRootPath = ROOTPATH . '../';
+    $serverRootPath = dirname(ROOTPATH) . '/';
 } else {
     define('ROOTPATH', '../');
     $serverRootPath = ROOTPATH;
