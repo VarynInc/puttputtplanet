@@ -4,7 +4,7 @@
  * @author: jf
  * @date: 9/2/2017
  */
-
+ 
 abstract class LogMessageLevel {
     const None = 0;
     const Info = 1;
@@ -47,12 +47,13 @@ class LogMessage
      */
     private static function _defaultFileWritablePath () {
         // determines where there is a secured writable area we can manipulate file storage
+        // Because this is a static function we don't yet have our constant defined SERVER_DATA_PATH
         if (isset($_SERVER['DOCUMENT_ROOT']) && strlen($_SERVER['DOCUMENT_ROOT']) > 0) {
-            $serverRootPath = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+            $serverRootPath = dirname($_SERVER['DOCUMENT_ROOT']) . '/';
         } else {
-            $serverRootPath = '';
+            $serverRootPath = './';
         }
-        return $serverRootPath . '..' . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR . 'logs' . DIRECTORY_SEPARATOR;
+        return $serverRootPath . 'data/logs/';
     }
 
     /**
