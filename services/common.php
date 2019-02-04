@@ -2375,18 +2375,19 @@ function showBooleanChecked($flag) {
 }
 
 // "Global" PHP variables available to all scripts. See also serverConfig.php.
-$enginesisLogger = new LogMessage(array(
+$enginesisLogger = new LogMessage([
     'log_active' => true,
     'log_level' => LogMessageLevel::All,
     'log_to_output' => false,
     'log_to_file' => true
-));
+]);
 $page = '';
 $webServer = '';
 $enginesis = new Enginesis($siteId, null, $developerKey);
 $serverName = $enginesis->getServerName();
 $serverStage = $enginesis->getServerStage();
-setErrorReporting($serverStage != ''); // turn on errors for all stages except LIVE TODO: Remove from above when we are going live.
+// turn on errors for all stages except LIVE TODO: Remove from above when we are going live.
+setErrorReporting($serverStage != '');
 $isLoggedIn = $enginesis->isLoggedInUser();
 if ($isLoggedIn) {
     $userId = $enginesis->getUserId();
