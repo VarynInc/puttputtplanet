@@ -26,6 +26,7 @@ class LogMessage
     private $_logToOutput;
     private $_logToURL;
     private $_logToSocket;
+    private $_serverStage;
     private $_active;
     private $_logLevel;
     private $_isValid;
@@ -62,7 +63,7 @@ class LogMessage
      */
     private static function _defaultFilePrefix () {
         if ( ! defined('LOGFILE_PREFIX')) {
-            define('LOGFILE_PREFIX', 'enginesis_php_');
+            define('LOGFILE_PREFIX', 'enginesis');
         }
         return LOGFILE_PREFIX;
     }
@@ -179,42 +180,52 @@ class LogMessage
      * @param $loggingConfiguration {array} key/value pairs described by allConfigurationOptions()
      */
     private function _configure($loggingConfiguration) {
+        if (isset($loggingConfiguration['stage'])) {
+            $stage = $loggingConfiguration['stage'];
+            if (strlen($stage) > 2) {
+                // if it does not start with -? and it is longer than 2 chars then assume it is a host name
+                $stage = serverStage($stage);
+            }
+        } else {
+            $stage = serverStage();
+        }
+        $this->_serverStage = $stage;
         if (isset($loggingConfiguration['log_active'])) {
             $this->_active = $this->castToBoolean($loggingConfiguration['log_active']);
         } else {
             $this->_active = true;
         }
-        if (isset($loggingConfiguration['log_level'])) { //
+        if (isset($loggingConfiguration['log_level'])) {
             $this->_logLevel = $loggingConfiguration['log_level'];
         } else {
             $this->_logLevel = LogMessageLevel::All;
         }
-        if (isset($loggingConfiguration['log_to_output'])) { //
+        if (isset($loggingConfiguration['log_to_output'])) {
             $this->_logToOutput = $this->castToBoolean($loggingConfiguration['log_to_output']);
         } else {
             $this->_logToOutput = false;
         }
-        if (isset($loggingConfiguration['log_to_url'])) { //
+        if (isset($loggingConfiguration['log_to_url'])) {
             $this->_logToURL = $loggingConfiguration['log_to_url'];
         } else {
             $this->_logToURL = '';
         }
-        if (isset($loggingConfiguration['log_to_socket'])) { //
+        if (isset($loggingConfiguration['log_to_socket'])) {
             $this->_logToSocket = $loggingConfiguration['log_to_socket'];
         } else {
             $this->_logToSocket = 0;
         }
-        if (isset($loggingConfiguration['log_file_prefix'])) { //
+        if (isset($loggingConfiguration['log_file_prefix'])) {
             $this->_logFilePrefix = $loggingConfiguration['log_file_prefix'];
         } else {
-            $this->_logFilePrefix = LogMessage::_defaultFilePrefix();
+            $this->_logFilePrefix = LogMessage::_defaultFilePrefix() . $stage . '_php_';
         }
-        if (isset($loggingConfiguration['log_file_path'])) { //
+        if (isset($loggingConfiguration['log_file_path'])) {
             $this->_logFilePath = $loggingConfiguration['log_file_path'];
         } else {
             $this->_logFilePath = LogMessage::_defaultFileWritablePath();
         }
-        if (isset($loggingConfiguration['log_to_file'])) { //
+        if (isset($loggingConfiguration['log_to_file'])) {
             $this->_logToFile = $this->castToBoolean($loggingConfiguration['log_to_file']);
         } else {
             $this->_logToFile = ! isEmpty($this->_logFilePath) || ! isEmpty($this->_logFilePrefix);
@@ -232,6 +243,9 @@ class LogMessage
     public function setConfigurationParameters($loggingConfiguration) {
         $logToPathChanged = false;
 
+        if (isset($loggingConfiguration['stage'])) {
+            $this->_serverStage = $loggingConfiguration['stage'];
+        }
         if (isset($loggingConfiguration['log_active'])) {
             $this->_active = $this->castToBoolean($loggingConfiguration['log_active']);
         }
@@ -282,6 +296,7 @@ class LogMessage
             'log_file_prefix' => LogMessage::_defaultFilePrefix(),
             'log_to_url' => 'http://enginesis-l.com/procs/log.php',
             'log_to_socket' => 8001,
+            'stage' => serverStage()
         );
         return $configuration;
     }
@@ -386,6 +401,23 @@ class LogMessage
     }
 
     /**
+     * Helper function when debugging session logic, to keep it separated from everything else.
+     * Messages are only logged when global constant DEBUG_SESSION is set true.
+     * @param $message {string} Message to show in the logs.
+     * @param null $subsystem {string} Keep messages organized by domain, default is SESSION.
+     * @param null $sourceFile {string} Optional, log the file that generated the message.
+     * @param null $lineNumber {integer} Optional, log the line number that generated the message.
+     */
+    public function logSession($message, $subsystem = 'SESSION', $sourceFile = null, $lineNumber = null) {
+        if ( ! defined('DEBUG_SESSION')) {
+            define('DEBUG_SESSION', false);
+        }
+        if (DEBUG_SESSION) {
+            $this->log($message, LogMessageLevel::Information, $subsystem, $sourceFile, $lineNumber);
+        }
+    }
+
+    /**
      * Determine if the logging is working or not.
      */
     public function isValid() {
@@ -406,5 +438,5 @@ class LogMessage
         echo '<pre>';
         echo(var_export($variable, true));
         echo '</pre></div>';
-    }    
+    }
 }
