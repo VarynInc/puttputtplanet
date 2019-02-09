@@ -2374,6 +2374,11 @@ function showBooleanChecked($flag) {
     }
 }
 
+function debugLog($message) {
+    global $enginesisLogger;
+    $enginesisLogger->log($message, LogMessageLevel::Info, 'System');
+}
+
 // "Global" PHP variables available to all scripts. See also serverConfig.php.
 $enginesisLogger = new LogMessage([
     'log_active' => true,

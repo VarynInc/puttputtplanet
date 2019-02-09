@@ -155,10 +155,10 @@ class Enginesis
     private function setServerPaths() {
         $guessRootPath = $_SERVER['DOCUMENT_ROOT'] . '/';
         $this->m_serverPaths = [
-            'DATA'     => defined(SERVER_DATA_PATH) ? SERVER_DATA_PATH : $guessRootPath . '../data/',
-            'PRIVATE'  => defined(SERVER_PRIVATE_PATH) ? SERVER_PRIVATE_PATH : $guessRootPath . '../private/',
-            'PUBLIC'   => defined(ROOTPATH) ? ROOTPATH : $guessRootPath,
-            'SERVICES' => defined(SERVICE_ROOT) ? SERVICE_ROOT : $guessRootPath . '../services/'
+            'DATA'     => defined('SERVER_DATA_PATH') ? SERVER_DATA_PATH : $guessRootPath . '../data/',
+            'PRIVATE'  => defined('SERVER_PRIVATE_PATH') ? SERVER_PRIVATE_PATH : $guessRootPath . '../private/',
+            'PUBLIC'   => defined('ROOTPATH') ? ROOTPATH : $guessRootPath,
+            'SERVICES' => defined('SERVICE_ROOT') ? SERVICE_ROOT : $guessRootPath . '../services/'
         ];
     }
 
