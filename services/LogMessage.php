@@ -111,6 +111,13 @@ class LogMessage
     }
 
     /**
+     * Route the log message to the database connection.
+     * @param $message
+     */
+    private function _logToDatabase ($message) {
+    }
+
+    /**
      * Format a log message given the parameters.
      * @param $message
      * @param $level
