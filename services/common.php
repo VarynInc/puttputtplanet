@@ -2389,6 +2389,7 @@ $enginesisLogger = new LogMessage([
 $page = '';
 $webServer = '';
 $enginesis = new Enginesis($siteId, null, $developerKey);
+$enginesis->setDebugFunction('reportError');
 $serverName = $enginesis->getServerName();
 $serverStage = $enginesis->getServerStage();
 // turn on errors for all stages except LIVE TODO: Remove from above when we are going live.

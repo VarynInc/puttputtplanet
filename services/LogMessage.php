@@ -84,7 +84,7 @@ class LogMessage
             }
         } catch (Exception $e) {
             $this->_isValid = false;
-            error_log("LogMessage exception: $message\n");
+            error_log("LogMessage.logToFile exception on $this->_activeLogFileName: $message\n");
         }
     }
 

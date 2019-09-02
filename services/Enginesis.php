@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.4.64');
+    define('ENGINESIS_VERSION', '2.4.70');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -14,6 +14,7 @@ if ( ! defined('SESSION_COOKIE')) {
     define('REFRESH_COOKIE', 'engrefreshtoken');
     define('SESSION_USERINFO', 'engsession_user');
     define('SESSION_DAYSTAMP_HOURS', 48);
+    define('SESSION_EXPIRE_SECONDS', 86400);   // Sessions expire in 1 day
     define('SESSION_USERID_CACHE', 'engsession_uid');
 }
 
@@ -906,6 +907,7 @@ class Enginesis
      * @return string An error code if the function fails to clear the cookies, or an empty string if successful.
      */
     private function sessionClear () {
+        $sessionExpireTime = SESSION_EXPIRE_SECONDS;
         $this->m_authToken = null;
         $this->m_authTokenWasValidated = false;
         $this->m_userName = '';
@@ -916,10 +918,10 @@ class Enginesis
         $this->m_isLoggedIn = false;
         $rc = '';
         if ( ! headers_sent()) {
-            if (setcookie(SESSION_COOKIE, null, time() - 86400, '/', $this->sessionCookieDomain()) === false) {
+            if (setcookie(SESSION_COOKIE, null, time() - $sessionExpireTime, '/', $this->sessionCookieDomain()) === false) {
                 $rc = 'CANNOT_SET_SESSION';
             }
-            setcookie(SESSION_USERINFO, null, time() - 86400, '/', $this->sessionCookieDomain());
+            setcookie(SESSION_USERINFO, null, time() - $sessionExpireTime, '/', $this->sessionCookieDomain());
         }
         $_COOKIE[SESSION_COOKIE] = null;
         $_COOKIE[SESSION_USERINFO] = null;
@@ -1196,7 +1198,7 @@ class Enginesis
             $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
         }
         if ($debug) {
-            $this->debuLog("callServerAPI response from $fn: $contents");
+            $this->debugCallback("callServerAPI response from $fn: $contents");
         }
         if ($response == 'json') {
             $contentsObject = json_decode($contents);
@@ -1413,7 +1415,7 @@ class Enginesis
         }
         if ($saveSession) {
             // TODO: Save session info in a cookie so that it is available on the next page load
-            // setcookie(REFRESH_COOKIE, null, time() - 86400, '/', $this->sessionCookieDomain());
+            // setcookie(REFRESH_COOKIE, null, time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain());
         }
         return $userInfo;
     }
@@ -1469,7 +1471,7 @@ class Enginesis
         $enginesisResponse = $this->callServerAPI('UserLogout', array());
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         $this->m_refreshToken = null;
-        setcookie(REFRESH_COOKIE, null, time() - 86400, '/', $this->sessionCookieDomain());
+        setcookie(REFRESH_COOKIE, null, time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain());
         $this->sessionClear();
         return $results != null;
     }
@@ -2076,7 +2078,7 @@ class Enginesis
      * @return object
      */
     public function gameGetByName ($gameName) {
-        $enginesisResponse = $this->callServerAPI('GameGetByName', array('game_name' => $gameName));
+        $enginesisResponse = $this->callServerAPI('GameGetByName', ['game_name' => $gameName], true);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && isset($results[0])) {
             $gameInfo = $results[0];
