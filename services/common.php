@@ -1,15 +1,19 @@
 <?php
 /**
- * Common utility PHP functions for sites and services that communite with the Enginesis backend.
- * This file defines the following globals:
+ * Common utility PHP functions for sites and services that communicate with the Enginesis backend.
+ * This file defines the following globals, which are global so they can be used in subordinate PHP pages:
  *   SERVER_ROOT is the file path to the root of the web site file structure. 
- *   $serverStage = -l, -q, -d,or '' for Live
- *   $server = which enginesis server to converse with, full protocol/domain/url e.g. https://www.enginesis.com
- *   $siteId = enginesis site_id for this website.
- *   $enginesisServer = location/root URL of the enginesis server we are conversing with
- *   $webServer = our (this) web server
- *   $serverStage = the server stage we think we are
- *   $isLoggedIn = true if the user is logged in
+ *   $enginesis: a global to access this object instance
+ *   $siteId: enginesis site_id for this website.
+ *   $serverStage: stage for this instance: -l, -d, -q, or '' for Live
+ *   $serverName: name of this server?
+ *   $server: which enginesis server to converse with, full protocol/domain/url e.g. https://www.enginesis.com
+ *   $enginesisServer: location/root URL of the enginesis server we are conversing with
+ *   $enginesisLogger: reference to the logging system
+ *   $webServer: our (this) web server e.g. varyn.com
+ *   $isLoggedIn: true if the user is logged in
+ *   $userId: the id of the logged in user
+ *   $page: unique page identifier for each page or section of the website
  *   serverConfig.php holds server-specific configuration variables and is not to be checked in to version control.
  */
 setErrorReporting(true);
@@ -67,7 +71,7 @@ function reportError($msg, $file = '', $line = 0, $fn = '') {
     global $enginesisLogger;
 
     if (strlen($file) == 0) {
-        $file = __FILE__;
+        $file = __FILE__; // TODO: This makes no sense, maybe try to get the call stack?
     }
     if ($line < 1) {
         $line = __LINE__;
@@ -118,6 +122,33 @@ function makeErrorResponse($errorCode, $errorMessage, $parameters) {
  */
 function currentPageName() {
     return basename($_SERVER['PHP_SELF'], '.php');
+}
+
+/**
+ * Append a query parameter on to the end of a URL string. This helper function handles
+ * the edge cases.
+ * @param $url {string} The initial URL. Can be null or empty string.
+ * @param $key {string} A key to add as a query parameter. Cannot be empty.
+ * @param $value {string} The value for the key. Cannot be null.
+ */
+function appendQueryParameter($url, $key, $value) {
+    if ( ! empty($key) && $value !== null) {
+        if (empty($url)) {
+            $url = '';
+        }
+        $queryString = urlencode($key) . '=' . urlencode($value);
+        $hasQuery = strpos($url, '?');
+        if ($hasQuery === false) {
+            $updatedURL = $url. '?' . $queryString;
+        } elseif ($hasQuery == (strlen($url) - 1)) {
+            $updatedURL = $url . $queryString;
+        } else {
+            $updatedURL = $url . '&' . $queryString;
+        }
+    } else {
+        $updatedURL = $url;
+    }
+    return $updatedURL;
 }
 
 function encodeURLParams ($parameters) {
@@ -395,6 +426,8 @@ function getURLContents ($url, $get_params = null, $post_params = null) {
  * @return array|mixed|string response from server or null if failed.
  */
 function callEnginesisAPI ($fn, $serverURL, $paramArray) {
+    global $enginesisLogger;
+
     if ( ! isset($paramArray['response'])) {
         $paramArray['response'] = 'json';
     }
@@ -428,30 +461,30 @@ function callEnginesisAPI ($fn, $serverURL, $paramArray) {
                 curl_setopt($ch, CURLOPT_CAINFO, $certPath);
                 curl_setopt($ch, CURLOPT_CAPATH, $certPath);
             } else {
-                reportError("callEnginesisAPI Cant locate private certs $certPath", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+                $enginesisLogger->log("Cant locate SSL certs $certPath", LogMessageLevel::Error, 'callEnginesisAPI', __FILE__, __LINE__);
             }
         }
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $this->encodeURLParams($parameters));
         $contents = curl_exec($ch);
-        $succeeded = strlen($contents) > 0;
-        if ( ! $succeeded) {
+        if (empty($contents)) {
             $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. ' . curl_error($ch);
-            reportError($errorInfo, __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+            $enginesisLogger->log($errorInfo, LogMessageLevel::Error, 'callEnginesisAPI', __FILE__, __LINE__);
             $contents = makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
         }
         curl_close($ch);
     } else {
         $contents = makeErrorResponse('SYSTEM_ERROR', 'System error: unable to contact ' . $serverURL . ' or the server did not respond.', $parameters);
     }
-    if ($debug) {
-        reportError("callServerAPI response from $fn: $contents", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+    if ($enginesisLogger) {
+        $enginesisLogger->log("parameters for $fn: " . $this->encodeURLParams($parameters), LogMessageLevel::Info, 'callEnginesisAPI', __FILE__, __LINE__);
+        $enginesisLogger->log("response from $fn: $contents", LogMessageLevel::Info, 'callEnginesisAPI', __FILE__, __LINE__);
     }
     if ($response == 'json') {
         $contentsObject = json_decode($contents);
         // TODO: We should verify the response is a valid EnginesisReponse object
         if ($contentsObject == null) {
-            reportError("callServerAPI could not parse JSON into an object: $contents", __FILE__, __LINE__, 'callEnginesisAPI:' . $fn);
+            $enginesisLogger->log("callServerAPI could not parse JSON into an object: $contents", LogMessageLevel::Error, 'callEnginesisAPI', __FILE__, __LINE__);
         }
     }
     return $contentsObject;
@@ -728,11 +761,6 @@ function isLive() {
     return serverStage() == '';
 }
 
-function coregDataFolder($site_id) {
-    // return the location of co-reg interface files
-    return siteDataFolder($site_id);
-}
-
 function serverDataFolder() {
     // This folder is not shared on the live servers. Use for server specific data (such as log files)
     return SERVER_DATA_PATH . 'enginesis' . DIRECTORY_SEPARATOR;
@@ -744,26 +772,6 @@ function getServerHTTPProtocol ($return_full_protocol = true) {
         $serverProtocol .= '://';
     }
     return $serverProtocol;
-}
-
-function siteDataFolder($site_id) {
-    // TODO: was getSiteDataFolder
-    // This folder is site based. It is shared among all the load-balanced servers. (was getStageDataFolder)
-    global $site_data;
-    $siteDataPath = $site_data[$site_id]['site_data_path'];
-    if (strlen($siteDataPath) == 0) {
-        $serverNameMain = serverTail();
-        if( strpos($serverNameMain, '.') < 1 ) {
-            reportError("bad host $serverNameMain", __FILE__, __LINE__, 'siteDataFolder');
-        } elseif (strpos($serverNameMain, '-') !== false) {
-            $siteDataPath = SERVER_DATA_PATH . substr($serverNameMain, 0, strpos($serverNameMain, '-')) . substr($serverNameMain, strpos($serverNameMain, '-') + 2, strlen($serverNameMain)) . '/';
-        } else {
-            $siteDataPath = SERVER_DATA_PATH . substr($serverNameMain, 0, strpos($serverNameMain, '.')) . '/';
-        }
-    } else {
-        $siteDataPath = SERVER_DATA_PATH . $siteDataPath . '/';
-    }
-    return $siteDataPath;
 }
 
 function enginesisParameterObjectMake ($fn, $site_id, $parameters) {
@@ -1404,180 +1412,6 @@ function ageFromDate ($checkDate, $referenceDate = null) {
 // =================================================================
 
 /**
- * Figure out which domain we want to save the cookie under.
- * @param null $serverName
- * @return null|string
- */
-function sessionCookieDomain ($serverName = null) {
-    $newDomain = null;
-    $domain = serverTail($serverName);
-    if (strlen($domain) > 0) {
-        $newDomain = '.' . $domain;
-    }
-    return $newDomain;
-}
-
-/**
- * Generate a time stamp for the current time rounded to the nearest SESSION_DAYSTAMP_HOURS hour.
- * This is used for access tokens as theya re short-lived.
- * @return int
- */
-function sessionDayStamp () {
-    return floor(time() / (SESSION_DAYSTAMP_HOURS * 60 * 60)); // good for X hours
-}
-
-/**
- * Generate a time stamp for the current time rounded to the nearest SESSION_REFRESH_HOURS hour.
- * This is used for refresh tokens as they are long-lived.
- * @return int
- */
-function sessionRefreshStamp () {
-    return floor(time() / (SESSION_REFRESH_HOURS * 60 * 60));
-}
-
-/**
- * Create a timestamp string for the current refresh token expiration.
- * @return string
- */
-function sessionRefreshExpireTimestamp() {
-    $dateExpires = new DateTime();
-    $dateExpires->add(new DateInterval(SESSION_REFRESH_INTERVAL));
-    return $dateExpires->format('Y-m-d H:i:s');
-}
-
-/**
- * Determine if a day stamp is currently valid. Day stamps expire after SESSION_DAYSTAMP_HOURS.
- * @param $dayStamp
- * @return bool
- */
-function sessionIsValidDayStamp ($dayStamp) {
-    $day_stamp_current = sessionDayStamp();
-    return ! ($dayStamp < ($day_stamp_current - (SESSION_DAYSTAMP_HOURS / 24)) || $dayStamp > $day_stamp_current);
-}
-
-/**
- * Determine if a refresh time stamp is currently valid. Refresh stamps expire after SESSION_REFRESH_HOURS.
- * @param $refreshStamp
- * @return bool
- */
-function sessionIsValidRefreshStamp ($refreshStamp) {
-    $day_stamp_current = sessionRefreshStamp();
-    return ! ($refreshStamp < ($day_stamp_current - (SESSION_REFRESH_HOURS / 24)) || $refreshStamp > $day_stamp_current);
-}
-
-/**
- * Create a user-based and time-sensitive session identifier. Typically used to identify a unique game session
- * for a specific user so another user can't spoof that user.
- * @param $site_id
- * @param $user_id
- * @param $game_id
- * @return string
- */
-function sessionMakeId ($site_id, $user_id, $game_id) {
-    global $site_data;
-    if (isset($site_data[$site_id])) {
-        $developer_key = $site_data[$site_id]['encryption_key'];
-        if ( ! isset($user_id) || $user_id == null || $user_id < 1) {
-            $user_id = 0;
-        }
-        if ( ! isset($game_id) || $game_id == null || $game_id < 1) {
-            $game_id = 0;
-        }
-        return md5($developer_key . sessionDayStamp() . '' . $user_id . '' . $game_id);
-    } else {
-        return null;
-    }
-}
-
-/**
- * Create a session hash that serves as a one-way hash to check if any session data was tampered with.
- * This requires a logged in user otherwise the session id generated will not be unique and will look
- * the same for all anonymous users on the same day-stamp.
- * @param $site_id {int} must be a valid site-id.
- * @param $user_id {int} must be a valid user-id on site-id.
- * @param $user_name {string} user name associated to user-id, would make the session invalid if the user changes their name.
- * @param $site_user_id {string} co-reg/SSO user-id.
- * @param $access_level {int} user's access level on site-id, would make the session invalid if the level of access changed.
- * @param $day_stamp {int} the Enginesis day-stamp to limit the valid time of the session
- * @return {string} session user hash.
- */
-function sessionMakeHash ($site_id, $user_id, $user_name, $site_user_id, $access_level, $day_stamp) {
-    global $site_data;
-    global $enginesisLogger;
-
-    if ( ! isset($site_data[$site_id])) {
-        $enginesisLogger->log("Invalid site id", LogMessageLevel::Error, 'sessionMakeHash', __FILE__, __LINE__);
-        return '';
-    }
-    if (isEmpty($user_id)) {
-        $enginesisLogger->log("User id must be provided", LogMessageLevel::Error, 'sessionMakeHash', __FILE__, __LINE__);
-        return '';
-    }
-    $site_key = $site_data[$site_id]['encryption_key'];
-    return md5('s=' . $site_id . '&u=' . $user_id . '&d=' . $day_stamp . '&n=' . $user_name . '&i=' . $site_user_id . '&l=' . $access_level . '&k=' . $site_key);
-}
-
-/**
- * Create a game session hash that serves as a one-way hash to check if any game session data was tampered with.
- * At least one of user-id, game-id, or site-mark must be provided and the combination must be unique across
- * all users of the site on this day.
- * @param $site_id {int} must be a valid site-id
- * @param $user_id {int} valid user-id on site-id, or 0 if creating an anonymous session
- * @param $user_name {string} user name associated to user-id, would make the session invalid if the user changes their name.
- * @param $game_id {int} valid game-id on site-id, or 0 if creating a site-wide session
- * @param $day_stamp {int} the Enginesis day-stamp to limit the valid time of the session
- * @param $site_mark {int} a numeric value to make this session unique when user-id and game-id are not provided (for example, an anonymous user playing a game.)
- * @return {string} session user game hash.
- */
-function sessionMakeGameHash ($site_id, $user_id, $user_name, $game_id, $day_stamp, $site_mark) {
-    global $site_data;
-    global $enginesisLogger;
-
-    if ( ! isset($site_data[$site_id])) {
-        $enginesisLogger->log("Invalid site id", LogMessageLevel::Error, 'sessionMakeGameHash', __FILE__, __LINE__);
-        return '';
-    }
-    if (isEmpty($user_id) && isEmpty($game_id) && isEmpty($site_mark)) {
-        $enginesisLogger->log("At least one of user-id($user_id), game-id($game_id), site-make($site_mark) must be provided", LogMessageLevel::Error, 'sessionMakeGameHash', __FILE__, __LINE__);
-        return '';
-    }
-    $site_key = $site_data[$site_id]['encryption_key'];
-    return md5('s=' . $site_id . '&u=' . $user_id . '&d=' . $day_stamp . '&n=' . $user_name . '&m=' . $site_mark . '&g=' . $game_id . '&k=' . $site_key);
-}
-
-/**
- * Anytime we look at the session cookie we should validate the hash in case someone tampered the cookie.
- * Compliment to `sessionMakeHash`.
- * @param $cr {string} Session hash that was previously generated with `sessionMakeHash()`.
- * @param $site_id {int} must be a valid site-id.
- * @param $user_id {int} must be a valid user-id on site-id.
- * @param $user_name {string} user name associated to user-id, would make the session invalid if the user changes their name.
- * @param $site_user_id {string} co-reg/SSO user-id.
- * @param $access_level {int} user's access level on site-id, would make the session invalid if the level of access changed.
- * @param $day_stamp {int} the Enginesis day-stamp to limit the valid time of the session
- * @return {boolean} true if the hash matches, false if it does not.
- */
-function sessionVerifyHash ($cr, $site_id, $user_id, $user_name, $site_user_id, $access_level, $day_stamp) {
-    return $cr == sessionMakeHash($site_id, $user_id, $user_name, $site_user_id, $access_level, $day_stamp);
-}
-
-/**
- * Anytime we look at the session cookie we should validate the hash in case someone tampered the cookie.
- * Compliment to `sessionMakeGameHash`.
- * @param $cr {string} Session hash that was previously generated with `sessionMakeGameHash()`.
- * @param $site_id {int} must be a valid site-id
- * @param $user_id {int} valid user-id on site-id, or 0 if creating an anonymous session
- * @param $user_name {string} user name associated to user-id, would make the session invalid if the user changes their name.
- * @param $game_id {int} valid game-id on site-id, or 0 if creating a site-wide session
- * @param $day_stamp {int} the Enginesis day-stamp to limit the valid time of the session
- * @param $site_mark {int} a numeric value to make this session unique when user-id and game-id are not provided (for example, an anonymous user playing a game.)
- * @return {boolean} true if the hash matches, false if it does not.
- */
-function sessionVerifyGameHash ($cr, $site_id, $user_id, $user_name, $game_id, $day_stamp, $site_mark) {
-    return $cr == sessionMakeGameHash($site_id, $user_id, $user_name, $game_id, $day_stamp, $site_mark);
-}
-
-/**
  * Generate a (hopefully) unique site mark. This is a pseudo-user-id to accommodate anonymous users who
  * use the site and we need to generate a unique session id on their behalf and not have it clash with
  * any other anonymous user on the site in this day-stamp window of time.
@@ -1585,254 +1419,6 @@ function sessionVerifyGameHash ($cr, $site_id, $user_id, $user_name, $game_id, $
  */
 function makeSiteMark() {
     return mt_rand(187902, mt_getrandmax());
-}
-
-/**
- * Make the plain-text version of the authentication token. This should never be handed out unless it is encrypted
- * (see sessionMakeAuthenticationTokenEncrypted).
- * @param $site_id {int|array) if an array we expect all parameters to be keys in this array.
- * @param $user_id
- * @param $user_name
- * @param $site_user_id
- * @param $network_id
- * @param $access_level
- * @param $day_stamp
- * @return string
- */
-function sessionMakeAuthenticationToken($site_id, $user_id, $user_name, $site_user_id, $network_id, $access_level, $day_stamp) {
-    if (is_array($site_id)) {
-        return sessionMakeAuthenticationToken($site_id['siteid'], $site_id['userid'], $site_id['username'], $site_id['siteuserid'], $site_id['networkid'], $site_id['accesslevel'], $site_id['daystamp']);
-    } else {
-        return "siteid=$site_id&userid=$user_id&siteuserid=$site_user_id&networkid=$network_id&username=$user_name&accesslevel=$access_level&daystamp=$day_stamp";
-    }
-}
-
-/**
- * Once a user is validated as logged in (UserLogin() or UserLoginCoreg()) then create an authentication token and save it
- * either in a session cookie or pass it around as a $POST variable (authtok). This will serve to identify a specific
- * user. The token times out and should be refreshed every interval.
- *
- * This function makes an authentication token to communicate to a client the info to identify a user (user_id, user_name, site_user_id, access_level)
- * These values go in encrypted so a hacker can't view source and figure how to hack the game. Returns null if we cannot make a token.
- * Note we use the developer encryption key and not the site key as this key is discoverable in the client.
- *
- * @param $site_id
- * @param $user_id
- * @param $user_name
- * @param $site_user_id
- * @param $access_level
- * @param $network_id
- * @param string $language_code
- * @param null $sqlConn - needed if we need to look up the user by network-id/site-user-id
- * @return mixed
- */
-function sessionMakeAuthenticationTokenEncrypted($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code = 'en', $sqlConn = null) {
-    global $site_data;
-    if (($user_id == null || $user_id < 1) && (! empty($site_user_id) || ! empty($user_name))) { // no user id, derive one from site_user_id
-        $user_id = userIdFromSiteUserId ($site_id, $site_user_id, $user_name, $network_id, $language_code, $sqlConn);
-    }
-    $developerKey = $site_data[$site_id]['encryption_key'];
-    $dayStamp = sessionDayStamp(); // make sure the token has an expiration
-    $decryptedData = sessionMakeAuthenticationToken($site_id, $user_id, $user_name, $site_user_id, $network_id, $access_level, $dayStamp);
-    return encryptString($decryptedData, $developerKey);
-}
-
-/**
- * Make the encrypted refresh token. The user can present this token to get a new access token. We need the info to
- * identify the user so this token is only good for this user.
- * @param $site_id
- * @param $user_id
- * @param $user_name
- * @param $site_user_id
- * @param $access_level
- * @param $network_id
- * @param string $language_code
- * @param null $sqlConn - needed if we need to find or make a user-id from the network-id/site-user-id.
- * @return mixed
- */
-function sessionMakeRefreshTokenEncrypted($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code = 'en', $sqlConn = null) {
-    global $site_data;
-    if (($user_id == null || $user_id < 1) && (! empty($site_user_id) || ! empty($user_name))) { // no user id, derive one from site_user_id
-        $user_id = userIdFromSiteUserId ($site_id, $site_user_id, $user_name, $network_id, $language_code, $sqlConn);
-    }
-    $refreshKey = $site_data[$site_id]['encryption_key'] . REFRESH_TOKEN_KEY;
-    $dayStamp = sessionRefreshStamp(); // make sure the token has an expiration
-    $decryptedData = sessionMakeAuthenticationToken($site_id, $user_id, $user_name, $site_user_id, $network_id, $access_level, $dayStamp);
-    return encryptString($decryptedData, $refreshKey);
-}
-
-/**
- * Decrypt an authentication token and return an array of items contained in it. This function is designed to undo
- * what sessionMakeAuthenticationTokenEncrypted did but returning an array of the input parameters.
- * @param $site_id {int} we require the site id to know ow the token was encrypted.
- * @param $authenticationToken {string} the encrypted token.
- * @return array|null Returns null if the token could not be decrypted, when successful returns an array matching the
- *     input parameters of sessionMakeAuthenticationTokenEncrypted.
- */
-function sessionDecryptAuthenticationToken ($site_id, $authenticationToken) {
-    global $site_data;
-    $dataArray = null;
-    if (isset($site_data[$site_id])) {
-        $tokenData = decryptString($authenticationToken, $site_data[$site_id]['encryption_key']);
-        if ($tokenData != null && $tokenData != '') {
-            $dataArray = decodeURLParams($tokenData);
-        }
-    }
-    return $dataArray;
-}
-
-/**
- * Decrypt the refresh token and return its constituent parameters. We do not validate it here.
- * @param $site_id
- * @param $refreshToken
- * @return array|null
- */
-function sessionDecryptRefreshToken ($site_id, $refreshToken) {
-    global $site_data;
-    $dataArray = null;
-    if (isset($site_data[$site_id])) {
-        $refreshKey = $site_data[$site_id]['encryption_key'] . REFRESH_TOKEN_KEY;
-        $tokenData = decryptString($refreshToken, $refreshKey);
-        if ($tokenData != null && $tokenData != '') {
-            $dataArray = decodeURLParams($tokenData);
-        }
-    }
-    return $dataArray;
-}
-
-/**
- * For testing, make a refresh token from the current session.
- * @param $site_id
- * @param $logged_in_user_id
- * @param $language_code
- * @return string the refresh token or empty string if the current session was not set or invalid.
- */
-function sessionMakeRefreshTokenFromSession($site_id, $logged_in_user_id, $language_code) {
-    $authenticationToken = sessionGetAuthenticationToken();
-    $refreshToken = '';
-    if ( ! empty($authenticationToken)) {
-        $session_site_id = $site_id;
-        $user_id = $logged_in_user_id;
-        $user_name = '';
-        $site_user_id = '';
-        $access_level = 0;
-        $network_id = 1;
-        if (sessionValidateAuthenticationToken($authenticationToken, $session_site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code, null) == '') {
-            $refreshToken = sessionMakeRefreshTokenEncrypted($session_site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code, null);
-        }
-    }
-    return $refreshToken;
-}
-
-/**
- * Assuming some process before this validated the session, generate the encrypted token the client can use
- * to converse with the server later and not have to revalidate.
- * @param $site_id
- * @param $user_id
- * @param $user_name
- * @param $site_user_id
- * @param $access_level
- * @param $network_id {int} The network id related to $site_user_id if it is used.
- * @return string An error code, '' if successful.
- */
-function sessionSet ($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id) {
-    $language_code = sessionGetLanguageCode();
-    $authenticationToken = sessionMakeAuthenticationTokenEncrypted($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code, null);
-    return sessionSave($user_id, $authenticationToken);
-}
-
-/**
- * Clear any session data and forget any logged in user.
- * @return string An error code if the function fails to clear the cookies, or an empty string if successful.
- */
-function sessionClear () {
-    $rc = '';
-    if (setcookie(SESSION_COOKIE, null, time() - 86400, '/', sessionCookieDomain()) === false) {
-        reportError('setcookie failed', __FILE__, __LINE__, 'sessionClear');
-        $rc = 'CANNOT_SET_SESSION';
-    }
-    setcookie(SESSION_USERINFO, null, time() - 86400, '/', sessionCookieDomain());
-    $_COOKIE[SESSION_COOKIE] = null;
-    $_COOKIE[SESSION_AUTHTOKEN] = null;
-    $_COOKIE[SESSION_USERINFO] = null;
-    $GLOBALS[SESSION_USERID_CACHE] = null;
-    return $rc;
-}
-
-/**
- * Save the authenticated session to cookie so we can retrieve it next time this user returns.
- * @param $user_id int the user's id.
- * @param $authenticationToken string the encrypted authentication token generated by sessionMakeAuthenticationTokenEncrypted.
- * @return string An error code, '' if successful.
- */
-function sessionSave ($user_id, $authenticationToken) {
-    $rc = '';
-    $errorLevel = error_reporting(); // turn off warnings so we don't generate crap in the output stream. If we don't do this fucking php writes an error and screws up the output stream. (I cant get the try/catch to work without it)
-    error_reporting($errorLevel & ~E_WARNING);
-    try {
-        if (setcookie(SESSION_COOKIE, $authenticationToken, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', sessionCookieDomain()) === false) {
-            reportError('setcookie failed', __FILE__, __LINE__, 'sessionSave');
-            $rc = 'CANNOT_SET_SESSION';
-        }
-    } catch (Exception $e) {
-        reportError('could not set cookie: ' . $e->getMessage(), __FILE__, __LINE__, 'sessionSave');
-        $rc = 'CANNOT_SET_SESSION';
-    }
-    error_reporting($errorLevel); // put error level back to where it was
-    if ($rc == '') {
-        $_COOKIE[SESSION_COOKIE] = $authenticationToken;
-        $GLOBALS[SESSION_USERID_CACHE] = $user_id;
-        // $_POST['authtok'] = $authenticationToken; // not sure about this
-    }
-    return $rc;
-}
-
-/**
- * Save the authenticated user info to cookie so we can retrieve it next time this user returns. We do this
- * to allow clients to access the logged in user info easily after a login. Always verify the token is
- * valid before relying on this data.
- * @param $userInfo object the user's info as returned from a userLogin.
- * @return string An error code, '' if successful.
- */
-function sessionUserInfoSave ($site_id, $userInfo) {
-    global $site_data;
-    $siteBaseURL = $site_data[$site_id]['site_base_url'];
-    $siteCookieRoot = sessionCookieDomain(serverStageMatch($siteBaseURL));
-    $rc = '';
-    $errorLevel = error_reporting(); // turn off warnings so we don't generate crap in the output stream. If we don't do this fucking php writes an error and screws up the output stream. (I cant get the try/catch to work without it)
-    error_reporting($errorLevel & ~E_WARNING);
-    try {
-        $userInfoJson = json_encode($userInfo);
-        if (setcookie(SESSION_USERINFO, $userInfoJson, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $siteCookieRoot) === false) {
-            reportError('setcookie failed', __FILE__, __LINE__, 'sessionUserInfoSave');
-            $rc = 'CANNOT_SAVE_USERINFO';
-        }
-    } catch (Exception $e) {
-        reportError('could not set cookie: ' . $e->getMessage(), __FILE__, __LINE__, 'sessionUserInfoSave');
-        $rc = 'CANNOT_SAVE_USERINFO';
-    }
-    error_reporting($errorLevel); // put error level back to where it was
-    return $rc;
-}
-
-/**
- * Retrieve the authenticated user info from cookie. Always verify the token is
- * valid before relying on this data.
- * @return object The userInfo object or null if invalid or not set.
- */
-function sessionUserInfoGet () {
-    $userInfo = null;
-    $errorLevel = error_reporting(); // turn off warnings so we don't generate crap in the output stream. If we don't do this fucking php writes an error and screws up the output stream. (I cant get the try/catch to work without it)
-    error_reporting($errorLevel & ~E_WARNING);
-    if (isset($_COOKIE[SESSION_USERINFO])) {
-        try {
-            $userInfo = json_decode($_COOKIE[SESSION_USERINFO]);
-        } catch (Exception $e) {
-            reportError('could not get cookie: ' . $e->getMessage(), __FILE__, __LINE__, 'sessionUserInfoGet');
-        }
-    }
-    error_reporting($errorLevel); // put error level back to where it was
-    return $userInfo;
 }
 
 /**
@@ -1872,178 +1458,6 @@ function getBearerTokenInRequest() {
 }
 
 /**
- * Get the authentication token, either it was provided in the http get/post, or it is in the cookie. POST overrides cookie.
- * This function does not determine if the authentication token is actually valid (use sessionValidateAuthenticationToken for that.)
- * The authentication token can come in 3 ways:
- *   1. In HTTP headers HTTP_AUTHORIZATION Bearer,
- *   2. In the session cookie
- *   3. as a POST or GET parameter (least desirable)
- * @return string token, null if no token could be found.
- */
-function sessionGetAuthenticationToken () {
-    $authenticationToken = getBearerTokenInRequest();
-    if ($authenticationToken == null) {
-        if (isset($_COOKIE[SESSION_COOKIE])) {
-            $authenticationToken = $_COOKIE[SESSION_COOKIE];
-        } else {
-            $authenticationToken = getPostOrRequestVar('authtok', null);
-        }
-    }
-    return $authenticationToken;
-}
-
-/**
- * Determine if we previously established a valid session. If so, return session parameters and refresh the
- * session cookie. You can check the session cookie later.
- * @param $site_id
- * @param $user_id
- * @param $user_name
- * @param $site_user_id
- * @param $access_level
- * @param $network_id {int}
- * @param string $language_code
- * @param null $sqlConn
- * @return string
- */
-function sessionValidate ( & $site_id, & $user_id, & $user_name, & $site_user_id, & $access_level, & $network_id, $language_code = 'en', $sqlConn = null) {
-    $site_id = getPostOrRequestVar('site_id', sessionGetSiteId());
-    $authenticationToken = sessionGetAuthenticationToken();
-    if ($authenticationToken != '') {
-        $rc = sessionValidateAuthenticationToken($authenticationToken, $site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code, $sqlConn);
-        if ($rc == '') { // token is valid, set the session cookie as well
-            sessionSet($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id);
-        }
-    } else {
-        $rc = 'NOT_LOGGED_IN';
-    }
-    if ($rc != '') {
-        $user_id = 0;
-        $user_name = '';
-        $site_user_id = '';
-        $access_level = 0;
-        sessionClear();
-    }
-    return $rc;
-}
-
-/**
- * This is a private helper function used to get a token out of the authentication token. It's useful for one-off
- * queries where you want to extract a specific item out of the token. But since it will decrypt the token on
- * each call, try to use sessionValidate() if you need more than one token.
- * @param $key {string} The key of the item you are looking for.
- * @param null $site_id
- * @param null $authenticationToken
- * @return string the value of the item requested or '' if not found.
- */
-function sessionGetDataForKey ($key, $site_id = null, $authenticationToken = null) {
-    global $site_data;
-    $value = '';
-
-    if ( ! isset($site_data[$site_id])) {
-        $site_id = getPostOrRequestVar('site_id', 0);
-    }
-    if (empty($authenticationToken)) {
-        $authenticationToken = sessionGetAuthenticationToken();
-    }
-    if (strlen($authenticationToken) > 0 && isset($site_data[$site_id])) {
-        $dataArray = sessionDecryptAuthenticationToken($site_id, $authenticationToken);
-        if (isset($dataArray['daystamp'])) {
-            $dayStamp = $dataArray['daystamp'];
-            if (sessionIsValidDayStamp($dayStamp)) {
-                if (isset($dataArray[$key])) {
-                    $value = $dataArray[$key];
-                }
-            }
-        }
-    }
-    return $value;
-}
-
-function sessionGetSessionId ($site_id, $user_id, $game_id) { // return a session identifier - only good for SESSION_DAYSTAMP_HOURS hours
-    $session_id = sessionGetDataForKey('sessionid', $site_id, null);
-    if ($session_id == '') {
-        $session_id = sessionMakeId($site_id, $user_id, $game_id);
-    }
-    return $session_id;
-}
-
-/**
- * Get the user id stored in the session cookie. If not in the session or the session token is bad
- * then we attempt to see if it was previously saved in the cookie parameter cache. Since the session
- * cookie is encrypted this is not the fastest way to do this.
- * @return int - user id or 0 if the function fails.
- */
-function sessionGetUserId () {
-    $user_id = sessionGetDataForKey('userid', null, null);
-    if ($user_id == 0 && isset($GLOBALS[SESSION_USERID_CACHE])) {
-        $user_id = (int) $GLOBALS[SESSION_USERID_CACHE];
-    }
-    if (empty($user_id)) {
-        $user_id = 0;
-    }
-    return $user_id;
-}
-
-/**
- * Get the site id stored in the session cookie. If not in the session or the session token is bad
- * then we attempt to see if it was included in the HTTP request. Since the session cookie is encrypted this is not the
- * fastest way to do this.
- * @return int - site id or 0 if the function fails.
- */
-function sessionGetSiteId () {
-    $site_id = sessionGetDataForKey('siteid', null, null);
-    if (empty($site_id)) {
-        $site_id = (int) getPostOrRequestVar('site_id', 0);
-    }
-    return $site_id;
-}
-
-/**
- * Get the site-user-id network-id stored in the session cookie. If not in the session or the session token is bad
- * then we attempt to see if it was included in the HTTP request. Since the session cookie is encrypted this is not the
- * fastest way to do this.
- * @return int - network id or 0 if the function fails.
- */
-function sessionGetNetworkId () {
-    $network_id = sessionGetDataForKey('networkid', null, null);
-    if (empty($network_id)) {
-        $network_id = (int) getPostOrRequestVar('network_id', 0);
-    }
-    return $network_id;
-}
-
-/**
- * Get the site-user-id stored in the session cookie. Since the session cookie is encrypted this is not the
- * fastest way to do this.
- * @return string - site user id or empty if the function fails.
- */
-function sessionGetSiteUserId () {
-    return sessionGetDataForKey('siteuserid', null, null);
-}
-
-/**
- * Get the user access level stored in the session cookie. Since the session cookie is encrypted this is not the
- * fastest way to do this.
- * @return int access level or 0 if the function fails.
- */
-function sessionGetAccessLevel () {
-    $access_level = sessionGetDataForKey('accesslevel', null, null);
-    if (empty($access_level)) {
-        $access_level = 0;
-    }
-    return $access_level;
-}
-
-/**
- * Get the user name stored in the session cookie. Since the session cookie is encrypted this is not the
- * fastest way to do this.
- * @return string user name of empty if the function fails.
- */
-function sessionGetUserName () {
-    return sessionGetDataForKey('username', null, null);
-}
-
-/**
  * Attempt to figure out the clients language code/locale. If we cannot, default to 'en'.
  * @return string Language code.
  */
@@ -2059,148 +1473,6 @@ function sessionGetLanguageCode () {
         $language_code = 'en';
     }
     return $language_code;
-}
-
-/**
- * This is a debug function to echo out the current session cookie, it does not check if it is valid.
- * @param $site_id {int} If not provided we try to get it from $POST or $GET.
- */
-function sessionCookieDump ($site_id) {
-    global $site_data;
-    $authenticationToken = sessionGetAuthenticationToken();
-    if (strlen($authenticationToken) > 0) {
-        if ( ! isset($site_data[$site_id])) {
-            $site_id = getPostOrRequestVar('site_id', 0);
-        }
-        echo("<p>sessionCookieDump $site_id, $authenticationToken</p>\n");
-        $dataArray = sessionDecryptAuthenticationToken($site_id, $authenticationToken);
-        print_r($dataArray);
-    } else {
-        echo('<p>sessionCookieDump ' . SESSION_COOKIE . " cookie is not set or is not valid on site $site_id</p>\n");
-    }
-}
-
-/**
- * This function validates a token used to communicate to a client the logged in user_id, user_name, site_user_id, access_level.
- * @param $authenticationToken {string} a token to validate, generated with sessionMakeAuthenticationTokenEncrypted.
- * @param $site_id {int} site id.
- * @param $user_id {int} user id who is logged in.
- * @param $user_name {string} user name who is logged in.
- * @param $site_user_id {string} co-reg user id who is logged in, validated by the co-reg network SSO.
- * @param $access_level {int} level of access (from site-roles.)
- * @param $network_id {int} network to use to validate site_user_id
- * @param string $language_code {string} language code or locale.
- * @param null $sqlConn {object} existing database connection or null to use the connection pool.
- * @return string The result is an error code, '' if successful.
- */
-function sessionValidateAuthenticationToken ($authenticationToken, & $site_id, & $user_id, & $user_name, & $site_user_id, & $access_level, & $network_id, $language_code = 'en', $sqlConn = null) {
-    global $site_data;
-    $errorCode = '';
-
-    if (empty($authenticationToken)) {
-        $authenticationToken = sessionGetAuthenticationToken();
-    }
-    if (strlen($authenticationToken) > 0) {
-        if ( ! isset($site_data[$site_id])) {
-            $site_id = getPostOrRequestVar('site_id', 0);
-        }
-        $dataArray = sessionDecryptAuthenticationToken($site_id, $authenticationToken);
-        if (isset($dataArray['daystamp'])) {
-            $dayStamp = $dataArray['daystamp'];
-            if (sessionIsValidDayStamp($dayStamp) && isset($dataArray['siteid'])) {
-                $site_id = $dataArray['siteid'];
-                $user_id = $dataArray['userid'];
-                $user_name = $dataArray['username'];
-                $site_user_id = $dataArray['siteuserid'];
-                $access_level = $dataArray['accesslevel'];
-                $network_id = $dataArray['networkid'];
-            } else {
-                $errorCode = 'TOKEN_EXPIRED';
-            }
-        } else {
-            $errorCode = 'INVALID_TOKEN';
-        }
-    } else {
-        $errorCode = 'NO_TOKEN';
-    }
-    return $errorCode;
-}
-
-/**
- * Given a refresh token exchange it for the short-lived access token. Caller must check the error code returned
- * to know if a token was actually exchanged. When successful the session is also updated with the new info.
- * @param $site_id
- * @param $refreshToken
- * @param $authenticationToken
- * @param string $language_code
- * @param null $sqlConn
- * @return string error code, empty if token exchanged.
- */
-function sessionExchangeRefreshTokenForAuthenticationToken($site_id, & $refreshToken, & $authenticationToken, $language_code = 'en', $sqlConn = null) {
-    global $site_data;
-    $errorCode = '';
-
-    if (strlen($refreshToken) > 0) {
-        if ( ! isset($site_data[$site_id])) {
-            $site_id = getPostOrRequestVar('site_id', 0);
-        }
-        $dataArray = sessionDecryptRefreshToken($site_id, $refreshToken);
-        if (isset($dataArray['daystamp'])) {
-            $dayStamp = $dataArray['daystamp'];
-            if (sessionIsValidRefreshStamp($dayStamp) && isset($dataArray['siteid'])) {
-                $site_id = $dataArray['siteid'];
-                $user_id = $dataArray['userid'];
-                $user_name = $dataArray['username'];
-                $site_user_id = $dataArray['siteuserid'];
-                $access_level = $dataArray['accesslevel'];
-                $network_id = $dataArray['networkid'];
-                $authenticationToken = sessionMakeAuthenticationTokenEncrypted($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code, $sqlConn);
-                $refreshToken = sessionMakeRefreshTokenEncrypted($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id, $language_code, $sqlConn);
-                sessionSet($site_id, $user_id, $user_name, $site_user_id, $access_level, $network_id);
-            } else {
-                $errorCode = 'TOKEN_EXPIRED';
-            }
-        } else {
-            $errorCode = 'INVALID_TOKEN';
-        }
-    } else {
-        $errorCode = 'NO_TOKEN';
-    }
-    return $errorCode;
-}
-
-function sessionCacheAdditionalParams ($additional_params) {
-    // when the game comes back with a social request we need to recall any special parameters sent in to validate the request
-    $imploded_params = encodeURLParams($additional_params);
-    $_COOKIE[SESSION_PARAM_CACHE] = $imploded_params;
-    $GLOBALS[SESSION_PARAM_CACHE] = $imploded_params;
-    if (setcookie(SESSION_PARAM_CACHE, $imploded_params, 0, '/', sessionCookieDomain()) === false) {
-        reportError('setcookie failed', __FILE__, __LINE__, 'sessionCacheAdditionalParams');
-    }
-}
-
-function sessionRecallAdditionalParams ($add_to_globals = '') {
-    // compliment to sessionCacheAdditionalParams, get the cached items
-    $imploded_params = '';
-    $additional_params = null;
-    if (isset($GLOBALS[SESSION_PARAM_CACHE])) {
-        $imploded_params = $GLOBALS[SESSION_PARAM_CACHE];
-    } elseif (isset($_COOKIE[SESSION_PARAM_CACHE])) {
-        $imploded_params = $_COOKIE[SESSION_PARAM_CACHE];
-    }
-    if ($imploded_params != '') {
-        $additional_params = decodeURLParams($imploded_params);
-        if ($add_to_globals == 'GET' || $add_to_globals == '_GET') {
-            foreach ($additional_params as $key => $value) {
-                $_GET[$key] = $value;
-            }
-        } elseif ($add_to_globals == 'POST' || $add_to_globals == '_POST') {
-            foreach ($additional_params as $key => $value) {
-                $_POST[$key] = $value;
-            }
-        }
-    }
-    return $additional_params;
 }
 
 // =================================================================
