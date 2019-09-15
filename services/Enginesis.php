@@ -80,11 +80,9 @@ class Enginesis
     /**
      * Set up the Enginesis environment so it is able to easily make service requests with the server.
      * @method constructor
-     * @param $siteId {int} Site id to represent.
-     * @param $enginesisServer {string} which server you want to connect with. Leave empty to match current stage.
-     * @param $developerKey {string} Your developer key.
-     * TODO: set m_debugFunction as a function to call when a debug statement is called
-     * TODO: validate the developer key on site_id.
+     * @param int $siteId Site id to represent.
+     * @param string $enginesisServer which Enginesis server you want to connect with. Leave empty to match current stage.
+     * @param string $developerKey Your developer key.
      */
     public function __construct ($siteId, $enginesisServer, $developerKey) {
         $this->m_debug = true;
@@ -111,22 +109,9 @@ class Enginesis
         $this->m_refreshToken = null;
         $this->m_tokenStatus = EnginesisRefreshStatus::missing;
         $this->setServerPaths();
-        if (empty($enginesisServer)) {
-            // Caller doesn't know which stage, converse with the one that matches the stage we are on
-            $enginesisServiceRoot = $this->m_serviceProtocol . '://enginesis' . $this->m_stage . '.com/';
-        } elseif (strlen($enginesisServer) == 2) {
-            // Caller may provide a stage we should converse with
-            $enginesisServiceRoot = $this->m_serviceProtocol . '://enginesis' . $enginesisServer . '.com/';
-        } else {
-            // Caller can provide a specific server we should converse with
-            $enginesisServiceRoot = $this->m_serviceProtocol . '://' . $enginesisServer . '/';
-        }
-        $this->m_serviceRoot = $enginesisServiceRoot;
-        if (substr($this->m_serviceRoot, -1) != '/') {
-            $this->m_serviceRoot .= '/';
-        }
-        $this->m_serviceEndPoint = $enginesisServiceRoot . 'index.php';
-        $this->m_avatarEndPoint = $enginesisServiceRoot . 'avatar.php';
+        $this->setServiceRoot($enginesisServer);
+        $this->m_serviceEndPoint = $this->m_serviceRoot . 'index.php';
+        $this->m_avatarEndPoint = $this->m_serviceRoot . 'avatar.php';
         $this->restoreUserFromAuthToken(null);
     }
 
@@ -201,15 +186,6 @@ class Enginesis
      */
     public function isValidId ($id) {
         return $id != null && $id > 0;
-    }
-
-    /**
-     * Determine if the $id is not valid.
-     * @param $id
-     * @return bool
-     */
-    public function isInvalidId ($id) {
-        return ! $this->isValidId($id);
     }
 
     /**
@@ -396,7 +372,7 @@ class Enginesis
 
     /**
      * Determine the full domain name of the server we are currently running on.
-     * @return: {string} server host name only, e.g. www.enginesis.com.
+     * @return string server host name only, e.g. www.enginesis.com.
      */
     private function serverName() {
         if (isset($_SERVER['HTTP_HOST'])) {
@@ -412,34 +388,36 @@ class Enginesis
         return $server;
     }
 
+    /**
+     * Return the server name of the instance we are running on. This should return a host domain, not a URL. For example, www.varyn.com.
+     * @return string Server name.
+     */
     public function getServerName() {
-        return $this->m_server;
+        return empty($this->m_server) ? serverName() : $this->m_server;
     }
 
+    /**
+     * Return the Enginesis service root to the Enginesis server this instance is communicating with. This is expected to be a
+     * complete URL to the root of the Enginesis services endpoint, for example https://enginesis.varyn-d.com when the
+     * current instance is https://www.varyn-d.com.
+     * @return string Root Enginesis services URL.
+     */
     public function getServiceRoot() {
         return $this->m_serviceRoot;
     }
 
-    public function setDeveloperKey($developerKey) {
-        $this->m_developerKey = $developerKey;
-    }
-
-    public function setRefreshToken($refreshToken) {
-        $this->m_refreshToken = $refreshToken;
-    }
-
     /**
      * Return the domain name and TLD only (remove server name, protocol, anything else) e.g. this function
-     * converts http://www.games.com into games.com or http://www.games-q.com into games-q.com
-     * @param null $serverName
-     * @return null|string
+     * converts http://www.games.com into games.com or http://services.games-q.com into games-q.com
+     * @param string|null $proposedServerName a proposed domain. If null, the current domain.
+     * @return string The last two components of the proposed domain.
      */
-    private function serverTail ($serverName = null) {
-        if (strlen($serverName) == 0) {
-            $serverName = $this->getServerName();
+    public function serverTail($proposedServerName = '') {
+        if (strlen($proposedServerName) == 0) {
+            $proposedServerName = $this->getServerName();
         }
-        if ($serverName != 'localhost') {
-            $urlParts = explode('.', $serverName);
+        if ($proposedServerName != 'localhost') {
+            $urlParts = explode('.', $proposedServerName);
             $numParts = count($urlParts);
             if ($numParts > 1) {
                 $tld = '.' . $urlParts[$numParts - 1];
@@ -451,19 +429,43 @@ class Enginesis
             if (strpos($domain, '://') > 0) {
                 $domain = substr($domain, strpos($domain, '://') + 3);
             }
+            $proposedServerName = $domain . $tld;
         }
-        $serverName = $domain . $tld;
-        return $serverName;
+        return $proposedServerName;
+    }
+
+    /**
+     * Transform the host name into the matching stage-qualified host name requested. For example, if we are currently on
+     * www.enginesis-q.com and the $targetPlatform is -l, return www.enginesis-l.com.
+     * @param string $targetPlatform one of -l, -d, -x, -q or '' for live.
+     * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
+     * @return string The requalified host name.
+     */
+    public function domainForTargetPlatform($targetPlatform, $hostName = null) {
+        if (empty($hostName)) {
+            $hostName = serverName();
+        }
+        // find the tld
+        $lastDot = strrpos($hostName, '.');
+        if ($lastDot === false) {
+            // no .tld!
+            $domain = $hostName;
+        } else {
+            $domain = substr($hostName, 0, $lastDot);
+            $tld = substr($hostName, $lastDot + 1);
+            $domain = preg_replace('/-[ldqx]$/', '', $domain) . $targetPlatform . '.' . $tld;
+        }
+        return $domain;
     }
 
     /**
      * Parse the given host name to determine which stage we are currently running on.
-     * @param $hostName string - host name or domain name to parase. If null we try the current serverName().
-     * @return string: server host name only, e.g. www.enginesis.com.
+     * @param $hostName string - host name or domain name to parse. If null we try the current `serverName()`.
+     * @return string the -l, -d, -q, -x part, or '' for live.
      */
-    private function serverStage ($hostName = null) {
-        // return just the -l, -d, -q, -x part, or '' for live.
-        $targetPlatform = ''; // assume live until we prove otherwise
+    public function serverStage($hostName = null) {
+        // assume live until we prove otherwise
+        $targetPlatform = '';
         if (strlen($hostName) == 0) {
             $hostName = $this->serverName();
         }
@@ -474,11 +476,20 @@ class Enginesis
     }
 
     /**
+     * Determine if the proposed stage is valid.
+     * @param string $stage The proposed stage to check (one of -l, -d, -q, -x, or '' for live.)
+     * @return boolean true if valid otherwise false.
+     */
+    public function isValidStage($stage) {
+        return $stage == '' || preg_match('/^-[dlqx]$/i', $stage);
+    }
+
+    /**
      * Return the server stage this instance is running on (-l, -d, -q, '' for live.)
      * This is determined at object construction.
      * @return string
      */
-    public function getServerStage () {
+    public function getServerStage() {
         return $this->m_stage;
     }
 
@@ -496,6 +507,45 @@ class Enginesis
             $protocol = 'https';
         }
         return $protocol;
+    }
+
+    /**
+     * Determine and cache the Enginesis service we want to converse with. This should do the hard work
+     * of figuring out the matching domain to the hosting website and the matching stage. For example, if
+     * this is running on https://www.varyn.com and the stage is -q, then the expected Enginesis service is
+     * running at https://enginesis.varyn-q.com/.
+     * 
+     * @param string|null $enginesisServer The intended stage, a full domain, or empty.
+     *     - if empty, match the current domain: www.varyn-q.com becomes enginesis.varyn-q.com. This should be the most common usage.
+     *     - a stage designation, match to current domain but on that stage: specifying -q while currently on www.vary.com becomes enginesis.varyn-q.com.
+     *     - anything else forces the service endpoint to exactly that specification.
+     */
+    public function setServiceRoot($enginesisServer = null) {
+        $enginesisService = 'enginesis.';
+        $baseURL = $this->m_serviceProtocol . '://' . $enginesisService;
+        if ($enginesisServer === null) {
+            // Caller doesn't know which stage, converse with the one that matches the stage we are on
+            $enginesisServiceRoot = $baseURL . $this->serverTail();
+        } elseif ($this->isValidStage($enginesisServer)) {
+            // Caller may provide a stage we should converse with, e.g. -l
+            $enginesisServiceRoot = $baseURL . $this->serverTail($this->domainForTargetPlatform($enginesisServer));
+        } else {
+            // Caller can provide a specific server we should converse with
+            $enginesisServiceRoot = $enginesisServer;
+        }
+        if (substr($enginesisServiceRoot, -1) != '/') {
+            $enginesisServiceRoot .= '/';
+        }
+        $this->m_serviceRoot = $enginesisServiceRoot;
+        return $this->m_serviceRoot;
+    }
+
+    public function setDeveloperKey($developerKey) {
+        $this->m_developerKey = $developerKey;
+    }
+
+    public function setRefreshToken($refreshToken) {
+        $this->m_refreshToken = $refreshToken;
     }
 
     /**
@@ -856,7 +906,8 @@ class Enginesis
      */
     private function sessionUserInfoSave ($userInfo) {
         $rc = '';
-        $errorLevel = error_reporting(); // turn off warnings so we don't generate crap in the output stream. If we don't do this fucking php writes an error and screws up the output stream. (I cant get the try/catch to work without it)
+        // turn off warnings so we don't generate crap in the output stream. If we don't do this fucking php writes an error and screws up the output stream. (I cant get the try/catch to work without it)
+        $errorLevel = error_reporting();
         error_reporting($errorLevel & ~E_WARNING);
         try {
             $userInfoJSON = json_encode($userInfo);
@@ -868,7 +919,8 @@ class Enginesis
             $rc = 'CANNOT_SAVE_USERINFO';
             $this->setLastError($rc, 'sessionUserInfoSave could not set cookie: ' . $e->getMessage());
         }
-        error_reporting($errorLevel); // put error level back to where it was
+        // put error level back to where it was
+        error_reporting($errorLevel);
         return $rc;
     }
 
@@ -1011,8 +1063,11 @@ class Enginesis
     }
 
     /**
-     * User can set their own debug callback function we will call when we have a debug statement.
+     * Set a debug callback function to call when its time to log a debug statement. This allows the application
+     * to consolidate and handle logging. There is no default for this, so if this function is not set then
+     * this Enginesis SDK will not perform any logging even if it is turned on.
      * The function signature is `function debugCallback($message)`.
+     * 
      * @param function $debugFunction A function reference.
      * @return function|null The prior function that was set is returned.
      */
@@ -1047,6 +1102,7 @@ class Enginesis
      */
     public function debugDump () {
         echo("<h3>Enginesis object state</h3>");
+        echo("<p>Version: " . $this->version() . "</p>");
         echo("<p>Server: $this->m_server</p>");
         echo("<p>End point: $this->m_serviceEndPoint</p>");
         echo("<p>Stage: $this->m_stage</p>");
@@ -2092,7 +2148,7 @@ class Enginesis
      * @return string
      */
     public function avatarURL ($size = 0, $userId = 0) {
-        if ($this->isInvalidId($userId)) {
+        if ( ! $this->isValidId($userId)) {
             $userId = $this->m_userId;
         }
         return $this->m_avatarEndPoint . '?site_id=' . $this->m_siteId . '&user_id=' . $userId . '&size=' . $size;
@@ -2105,7 +2161,7 @@ class Enginesis
      */
     public function gameGet ($gameId) {
         $service = 'GameGet';
-        $parameters = ['game_id' => $this->isInvalidId($gameId) ? $this->gameId : $gameId];
+        $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && isset($results[0])) {
@@ -2141,7 +2197,7 @@ class Enginesis
     public function gameRatingUpdate ($rating, $gameId) {
         $service = 'GameRatingUpdate';
         $parameters = [
-            'game_id' => $this->isInvalidId($gameId) ? $this->gameId : $gameId,
+            'game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId,
             'rating' => ($rating < 0 || $rating > 100) ? 5 : $rating];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
@@ -2158,7 +2214,7 @@ class Enginesis
      */
     public function gameRatingGet ($gameId) {
         $service = 'GameRatingGet';
-        $parameters = ['game_id' => $this->isInvalidId($gameId) ? $this->gameId : $gameId];
+        $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && isset($results[0])) {
@@ -2270,7 +2326,7 @@ class Enginesis
      */
     public function gameDataGet($gameId) {
         $service = 'GameDataGet';
-        $parameters = ['game_id' => $this->isInvalidId($gameId) ? $this->gameId : $gameId];
+        $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && isset($results[0])) {
@@ -2297,7 +2353,7 @@ class Enginesis
      */
     public function userFavoriteGamesAssign($gameId) {
         $service = 'UserFavoriteGamesAssign';
-        $parameters = ['game_id' => $this->isInvalidId($gameId) ? $this->gameId : $gameId];
+        $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         return $this->resultsFromServerResponse($results);
@@ -2325,7 +2381,7 @@ class Enginesis
      */
     public function userFavoriteGamesDelete($gameId) {
         $service = 'UserFavoriteGamesDelete';
-        $parameters = ['game_id' => $this->isInvalidId($gameId) ? $this->gameId : $gameId];
+        $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         return $this->resultsFromServerResponse($results);
@@ -2354,7 +2410,7 @@ class Enginesis
     public function userFavoriteGamesMove($gameId, $sortOrder) {
         $service = 'UserFavoriteGamesMove';
         $parameters = [
-            'game_id' => $this->isInvalidId($gameId) ? $this->gameId : $gameId,
+            'game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId,
             'sort_order' => $sortOrder
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);

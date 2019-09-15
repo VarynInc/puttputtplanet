@@ -609,8 +609,8 @@ function serverTail ($serverName = null) {
         if (strpos($domain, '://') > 0) {
             $domain = substr($domain, strpos($domain, '://') + 3);
         }
+        $serverName = $domain . $tld;
     }
-    $serverName = $domain . $tld;
     return $serverName;
 }
 
@@ -643,35 +643,36 @@ function domainDropServer ($targetHost) {
 }
 
 /**
- * Transform the current host name into the matching host name requested. For example, if we are currently on
+ * Transform the host name into the matching stage-qualified host name requested. For example, if we are currently on
  * www.enginesis-q.com and the $targetPlatform is -l, return www.enginesis-l.com.
- * @param $targetPlatform -l/-d/-x/-q/ or live
- * @return string
+ * @param string $targetPlatform one of -l, -d, -x, -q or '' for live.
+ * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
+ * @return string The requalified host name.
  */
-function domainForTargetPlatform ($targetPlatform) {
-    // was getDomainForTargetPlatform
-    $hostName = serverName();
-    $lastDot = strrpos($hostName, '.'); // find the tld
-    if ($lastDot >= 0) {
+function domainForTargetPlatform ($targetPlatform, $hostName = null) {
+    if (empty($hostName)) {
+        $hostName = serverName();
+    }
+    $lastDot = strrpos($hostName, '.');
+    if ($lastDot === false) {
+        // no .tld!
+        $domain = $hostName;
+    } else {
         $domain = substr($hostName, 0, $lastDot);
         $tld = substr($hostName, $lastDot + 1);
-    } else { // no .tld!
-        $domain = $hostName;
-        $tld = '';
+        $domain = preg_replace('/-[ldqx]$/', '', $domain) . $targetPlatform . '.' . $tld;
     }
-    // TODO: remove -? from $hostname, then concat everything
-    $domain = preg_replace('/\-[l|d|q|x]$/', '', $domain);
-    return $domain . $targetPlatform . '.' . $tld;
+    return $domain;
 }
 
 /**
- * Parse the given host name to determine which stage we are currently running on. Return just
- *   the -l, -d, -q, -x part, or '' for live.
- * @param $hostName string - host name or domain name to parse. If null we try the current serverName().
- * @return string: server host name only, e.g. www.enginesis.com.
+ * Parse the given host name to determine which stage we are currently running on.
+ * @param $hostName string - host name or domain name to parse. If null we try the current `serverName()`.
+ * @return string the -l, -d, -q, -x part, or '' for live.
  */
-function serverStage ($hostName = null) {
-    $targetPlatform = ''; // assume live until we prove otherwise
+function serverStage($hostName = null) {
+    // assume live until we prove otherwise
+    $targetPlatform = '';
     if (strlen($hostName) == 0) {
         $hostName = serverName();
     }
