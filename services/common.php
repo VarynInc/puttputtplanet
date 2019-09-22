@@ -845,37 +845,6 @@ function validateInputFormHackerToken ($token) {
 }
 
 /**
- * We cache the logged in user object locally so we have the user data at our disposal without going back to the server.
- * @param $userInfo
- * @param $domain
- */
-function setSiteUserCookie ($userInfo, $domain) {
-    // $userInfo Object ( [user_id] => 10239 [site_id] => 106 [user_name] => Varyn [real_name] => Varyn [site_user_id] => [network_id] => 1 [dob] => 2004-02-16 [gender] => F [city] => [state] => [zipcode] => [country_code] => [email_address] => john@varyn.com [mobile_number] => [im_id] => [agreement] => 1 [img_url] => [about_me] => [date_created] => 2016-02-16 20:47:45 [date_updated] => [source_site_id] => 106 [last_login] => 2016-02-20 22:27:38 [login_count] => 34 [tagline] => [additional_info] => [reg_confirmed] => 1 [user_status_id] => 1 [site_currency_value] => 0 [site_experience_points] => 0 [view_count] => 0 [access_level] => 10 [role_name] => [user_rank] => 10001 [session_id] => cecfe3b4b5dac00d464eff98ba5c75c3 [cr] => d2a1bae6ef968501b648ccf253451a1a [authtok] => Dk39dEasNBgO79Mp0gjXnvGYBEPP06d5Pd KmpdvCnVEehliQpl5eezAdVfc9t9xsE7RDp5i9rPDjj73TXxaW1XOrVjWHwZsnQ0q/GsHtWl4tDGgS/lTMA== )
-    $userInfoJSON = json_encode($userInfo);
-    $_COOKIE[SITE_SESSION_COOKIE] = $userInfoJSON;
-    setcookie(SITE_SESSION_COOKIE, $userInfoJSON, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $domain);
-    debugLog('setSiteUserCookie ' . $userInfoJSON);
-}
-
-function getSiteUserCookie () {
-    return isset($_COOKIE[SITE_SESSION_COOKIE]) ? $_COOKIE[SITE_SESSION_COOKIE] : null;
-}
-
-function getSiteUserCookieObject () {
-    $userInfo = null;
-    $userInfoJSON = getSiteUserCookie();
-    if ($userInfoJSON != null) {
-        $userInfo = json_decode($userInfoJSON);
-    }
-    return $userInfo;
-}
-
-function clearSiteUserCookie ($domain) {
-    $_COOKIE[SITE_SESSION_COOKIE] = null;
-    setcookie(SITE_SESSION_COOKIE, null, time() - 86400, '/', $domain);
-}
-
-/**
  * Helper function to determine if the current session is valid. What we are looking for:
  *   1. User id and token exist
  *   2. user id matches token

@@ -28,7 +28,7 @@
     "use strict";
 
     var enginesis = {
-        VERSION: "2.4.70",
+        VERSION: "2.4.71",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -56,12 +56,11 @@
         refreshToken: null,
         sessionId: null,
         sessionExpires: null,
-        siteKey: null,
         developerKey: null,
         loggedInUserInfo: null,
         networkId: 1,
         platform: "",
-        locale: "US-en",
+        locale: "en-US",
         isNativeBuild: false,
         isBrowserBuild: typeof window !== "undefined" && typeof window.document !== "undefined" && typeof window.location !== "undefined",
         isNodeBuild: typeof process !== "undefined" && process.versions != null && process.versions.node != null,
@@ -105,6 +104,7 @@
      *        See documentation for Enginesis response object structure.
      */
     enginesis.init = function(parameters) {
+        var authToken = null;
         initializeLocalSessionInfo();
         if (parameters) {
             enginesis.siteId = parameters.siteId !== undefined ? parameters.siteId : 0;
@@ -114,54 +114,18 @@
             enginesis.languageCode = setLanguageCode(parameters.languageCode);
             enginesis.serverStage = parameters.serverStage !== undefined ? parameters.serverStage : "*";
             enginesis.developerKey = parameters.developerKey !== undefined ? parameters.developerKey : "";
-            enginesis.authToken = parameters.authToken !== undefined ? parameters.authToken : null;
             enginesis.callBackFunction = parameters.callBackFunction !== undefined ? parameters.callBackFunction : null;
+            authToken = parameters.authToken !== undefined ? parameters.authToken : null;
         }
         setPlatform();
         setProtocolFromCurrentLocation();
         qualifyAndSetServerStage(enginesis.serverStage);
-        if ( ! restoreUserFromAuthToken()) {
-            restoreUserSessionInfo();
-        }
-        if ( ! enginesis.isUserLoggedIn()) {
-            anonymousUserLoad();
-        }
+        restoreUserSession(authToken);
         if (restoreServiceQueue()) {
             // defer the queue processing
             global.setTimeout(restoreOnline, 500);
         }
     };
-
-    /**
-     * Initialize all user session related data to a known initial state.
-     */
-    function initializeLocalSessionInfo() {
-        enginesis.loggedInUserInfo = {
-            userId: 0,
-            userName: "",
-            fullName: "",
-            gender: "U",
-            dateOfBirth: null,
-            accessLevel: 0,
-            siteUserId: "",
-            rank: 10001,
-            level: "n00b",
-            experiencePoints: 0,
-            coins: 0,
-            loginDate: null,
-            email: null,
-            location: "",
-            country: ""
-        };
-
-        // Clear the session and user info
-        enginesis.networkId = 1;
-        enginesis.sessionId = null;
-        enginesis.authToken = null;
-        enginesis.authTokenWasValidated = false;
-        enginesis.authTokenExpires = null;
-        enginesis.refreshToken = null;
-    }
 
     /**
      * Review the current state of the enginesis object to make sure we have enough information
@@ -176,21 +140,29 @@
     }
 
     /**
-     * Determine if a given variable is considered an empty value.
-     * @param field
-     * @returns {boolean}
+     * Determine if a given variable is considered an empty value. A value is considered empty if it is any one of
+     * `null`, `undefined`, `false`, `NaN`, an empty string, an empty array, or 0. Note this does not consider an
+     * empty object `{}` to be empty.
+     * @param {any} field The parameter to be tested for emptiness.
+     * @returns {boolean} `true` if `field` is considered empty.
      */
     function isEmpty (field) {
-        return field === undefined || field === null || (typeof field === "string" && (field === "" || field === "undefined")) || (field instanceof Array && field.length == 0) || field === false || (typeof field === "number" && (isNaN(field) || field === 0));
+        return field === undefined
+        || field === null
+        || field === false
+        || (typeof field === "string" && (field === "" || field === "undefined"))
+        || (field instanceof Array && field.length == 0)
+        || (typeof field === "number" && (isNaN(field) || field === 0));
     }
 
     /**
      * Determine if a given variable is considered null (either null or undefined).
-     * @param field
-     * @returns {boolean}
+     * At the moment this will not check for "null"/"NULL" values, as when using SQL.
+     * @param {any} field A value to consider.
+     * @returns {boolean} `true` if `value` is considered null.
      */
     function isNull (field) {
-        return (typeof field === "undefined") || field === null;
+        return field === undefined || field === null;
     }
 
     /**
@@ -198,6 +170,7 @@
      * boolean intention. This works very different that the JavaScript coercion. For example,
      * "0" == true and "false" == true in JavaScript but here "0" == false and "false" == false.
      * @param {*} value A value to test.
+     * @returns {boolean} `true` if `value` is considered a coercible true value.
      */
     function coerceBoolean (value) {
         if (typeof value === "string") {
@@ -206,6 +179,64 @@
         } else {
             return value === true || value === 1;
         }
+    }
+
+    /**
+     * Coerce a value to the first non-empty value of a given set of parameters. It is expected the last
+     * parameter is a non-empty value and is the expected result when all arguments are empty values. If
+     * for some reason this function is called with an unexpected number of parameters it returns `null`.
+     * See `isEmpty()` for the meaning of "empty".
+     * @param {any} arguments Any number of parameters, at least the last one is expected to be not empty.
+     * @returns {any} The first parameter encountered, in order, that is not an empty value.
+     */
+    function coerceNotEmpty() {
+        var result;
+        var numberOfArguments = arguments.length;
+        if (numberOfArguments == 0) {
+            result = null;
+        } else if (numberOfArguments == 1) {
+            result = arguments[0];
+        } else {
+            for (var i = 0; i < numberOfArguments; i ++) {
+                if ( ! isEmpty(arguments[i])) {
+                    result = arguments[i];
+                    break;
+                }
+            }
+            if (result === undefined) {
+                result = arguments[numberOfArguments - 1];
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Coerce a value to the first non-null value of a given set of parameters. It is expected the last
+     * parameter is a non-null value and is the expected result when all arguments are null values. If
+     * for some reason this function is called with an unexpected number of parameters it returns `null`.
+     * See `isNull()` for the meaning of "null".
+     * @param {any} arguments Any number of parameters, at least the last one is expected to be not null.
+     * @returns {any} The first parameter encountered, in order, that is not a null value.
+     */
+    function coerceNotNull() {
+        var result;
+        var numberOfArguments = arguments.length;
+        if (numberOfArguments == 0) {
+            result = null;
+        } else if (numberOfArguments == 1) {
+            result = arguments[0];
+        } else {
+            for (var i = 0; i < numberOfArguments; i ++) {
+                if ( ! isNull(arguments[i])) {
+                    result = arguments[i];
+                    break;
+                }
+            }
+            if (result === undefined) {
+                result = arguments[numberOfArguments - 1];
+            }
+        }
+        return result;
     }
 
     /**
@@ -389,7 +420,6 @@
             updateGameInfo(enginesisResult);
             enginesis.sessionId = sessionInfo.session_id;
             console.log("enginesis.updateGameSessionInfo session_id is " + enginesis.sessionId);
-            enginesis.siteKey = sessionInfo.developerKey || "";
             if (sessionInfo.authtok) {
                 enginesis.authToken = sessionInfo.authtok;
                 enginesis.authTokenWasValidated = true;
@@ -415,6 +445,21 @@
     }
 
     /**
+     * Initialize all user session related data to a known initial state.
+     */
+    function initializeLocalSessionInfo() {
+        enginesis.loggedInUserInfo = null;
+
+        // Clear the session and user info
+        enginesis.networkId = 1;
+        enginesis.sessionId = null;
+        enginesis.authToken = null;
+        enginesis.authTokenWasValidated = false;
+        enginesis.authTokenExpires = null;
+        enginesis.refreshToken = null;
+    }
+
+    /**
      * After a successful login copy everything we got back from the server about the
      * validated user. For example, we are going to need the session-id, authentication token,
      * and user-id for subsequent transactions with the server.
@@ -425,10 +470,9 @@
         var updated = false;
         if (enginesisResult && enginesisResult.results && enginesisResult.results.result.row) {
             var userInfo = enginesisResult.results.result.row;
-            var loggedInUserInfo = enginesis.loggedInUserInfo;
 
             // verify session hash so that we know the payload was not tampered with
-            if ( ! sessionVerifyCr(userInfo.cr)) {
+            if ( ! sessionVerifyCr(userInfo.cr, userInfo)) {
                 // TODO: In this case, we should fail. The hash from the server doesn't match
                 // what we computed locally, so it appears someone is trying to impersonate
                 // another user. It could also be that the hash has expired and we just need
@@ -437,25 +481,11 @@
             }
             
             // Move server authorized user data into the local cache
-            loggedInUserInfo.userId = userInfo.user_id;
-            loggedInUserInfo.userName = userInfo.user_name;
-            loggedInUserInfo.fullName = userInfo.real_name;
-            loggedInUserInfo.gender = userInfo.gender;
-            loggedInUserInfo.dateOfBirth = userInfo.dob;
-            loggedInUserInfo.accessLevel = userInfo.access_level;
-            loggedInUserInfo.siteUserId = userInfo.site_user_id;
-            loggedInUserInfo.rank = userInfo.user_rank;
-            loggedInUserInfo.level = userInfo.level;
-            loggedInUserInfo.experiencePoints = userInfo.site_experience_points;
-            loggedInUserInfo.coins = userInfo.site_currency_value;
-            loggedInUserInfo.loginDate = userInfo.last_login;
-            loggedInUserInfo.email = userInfo.email_address;
-            loggedInUserInfo.location = userInfo.city;
-            loggedInUserInfo.country = userInfo.country_code;
+            enginesis.loggedInUserInfo = userInfo;
             enginesis.networkId = userInfo.network_id;
             updated = saveUserSessionInfo(userInfo);
-
-        // {"user_id":"10240","site_id":"106","user_name":"Killer","real_name":"Varyn System",
+// This is what we get back from the server call:
+// {"user_id":"10240","site_id":"106","user_name":"Killer","real_name":"Varyn System",
 // "site_user_id":null,"network_id":"1","dob":"1955-08-06","gender":"M","city":"New York, NY",
 // "state":"","zipcode":"","country_code":"US","email_address":"billing@varyn.com","mobile_number":"",
 // "im_id":"","agreement":"1","img_url":"","about_me":"","date_created":"2016-08-07 01:11:06",
@@ -496,55 +526,39 @@
      * Compute the session hash for the provided session information. If something is missing we will get
      * a default value from the current session, regardless if it is valid or not. It's not really valid
      * calling this function this way if authTokenWasValidated == false.
-     * @param {object} userInfo an object containing the key/value pairs, all of which are optional.
+     * @param {object} userInfo an object containing the key/value pairs identifying a user session, all of which are optional:
      *    siteId, siteKey, dayStamp, userId, userName, siteUserId, accessLevel
      * @returns {string} The hash for the current session.
      */
     function sessionMakeHash(userInfo) {
-        var loggedInUserInfo = enginesis.loggedInUserInfo;
         userInfo = userInfo || {};
-        if (isNull(userInfo.siteId)) {
-            userInfo.siteId = enginesis.siteId;
+        var loggedInUserInfo = enginesis.loggedInUserInfo || {};
+        var siteId = enginesis.siteId;
+        var userId = coerceNotEmpty(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
+        var userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
+        var accessLevel = coerceNotEmpty(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
+        var siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
+        var gameId = userInfo.gameId || enginesis.gameId;
+
+        // s=106&u=undefined&d=9079&n=undefined&g=1105&i=&l=undefined&m=0&k=null
+        // TODO: siteKey is null, where is that coming from????
+        
+        var dayStamp = userInfo.dayStamp || sessionDayStamp();
+        var siteMark = 0;
+        if (isNull(siteUserId)) {
+            siteUserId = "";
         }
-        if (isNull(userInfo.userId)) {
-            userInfo.userId = loggedInUserInfo.userId;
-        }
-        if (isNull(userInfo.gameId)) {
-            userInfo.gameId = enginesis.gameId;
-        }
-        if (isNull(userInfo.siteKey)) {
-            userInfo.siteKey = enginesis.siteKey;
-        }
-        if (isNull(userInfo.dayStamp)) {
-            userInfo.dayStamp = sessionDayStamp();
-        }
-        if (isNull(userInfo.userName)) {
-            userInfo.userName = loggedInUserInfo.userName;
-        }
-        if (isNull(userInfo.siteUserId)) {
-            userInfo.siteUserId = loggedInUserInfo.siteUserId;
-            if (isNull(userInfo.siteUserId)) {
-                userInfo.siteUserId = "";
-            }
-        }
-        if (isNull(userInfo.accessLevel)) {
-            userInfo.accessLevel = loggedInUserInfo.accessLevel;
-        }
-        if (userInfo.userId == 0) {
+        if (isNull(userId)) {
             // Use the site mark only if we do not have a user id
             if (isNull(userInfo.siteMark)) {
                 if (enginesis.anonymousUser) {
-                    userInfo.siteMark = enginesis.anonymousUser.userId;
-                } else {
-                    userInfo.siteMark = 0;
+                    siteMark = enginesis.anonymousUser.userId;
                 }
             }
-        } else {
-            userInfo.siteMark = 0;
         }
-        var hashClear = "s=" + userInfo.siteId + "&u=" + userInfo.userId + "&d=" + userInfo.dayStamp + "&n=" + userInfo.userName + "&g=" + userInfo.gameId + "&i=" + userInfo.siteUserId + "&l=" + userInfo.accessLevel + "&m=" + userInfo.siteMark + "&k=" + userInfo.siteKey;
+        var hashClear = "s=" + siteId + "&u=" + userId + "&d=" + dayStamp + "&n=" + userName + "&g=" + gameId + "&i=" + siteUserId + "&l=" + accessLevel + "&m=" + siteMark + "&k=" + enginesis.developerKey;
         var hash = enginesis.md5(hashClear);
-        console.log("sessionMakeHash from " + hashClear + " yields " + hash);
+        debugLog("sessionMakeHash from " + hashClear + " yields " + hash);
         return hash;
     }
 
@@ -553,10 +567,11 @@
      * the client. This helps us determine if the payload was tampered and a hacker is trying
      * to impersonate another user.
      * @param {string} crFromServer This is the hash computed on the server, usually returned in SessionBegin.
+     * @param {object|null} userInfo The user information object to validate. If null will validate against prior log in user information.
      * @returns {boolean} true if match, otherwise false.
      */
-    function sessionVerifyCr(crFromServer) {
-        return crFromServer == sessionMakeHash();
+    function sessionVerifyCr(crFromServer, userInfo) {
+        return crFromServer == sessionMakeHash(userInfo);
     }
 
     /**
@@ -907,11 +922,11 @@
             state_status: 0,
             response: "json"
         };
-        if (enginesis.loggedInUserInfo.userId != 0 && enginesis.authTokenWasValidated) {
-            serverParams.logged_in_user_id = enginesis.loggedInUserInfo.userId;
+        if (enginesis.loggedInUserInfo && enginesis.authTokenWasValidated && Math.floor(enginesis.loggedInUserInfo.user_id) != 0) {
+            serverParams.logged_in_user_id = enginesis.loggedInUserInfo.user_id;
             serverParams.authtok = enginesis.authToken;
             if (isNull(serverParams.user_id)) {
-                serverParams.user_id = enginesis.loggedInUserInfo.userId;
+                serverParams.user_id = enginesis.loggedInUserInfo.user_id;
             }
         }
         if (enginesis.gameId) {
@@ -1237,28 +1252,32 @@
         if ( ! key || /^(?:expires|max\-age|path|domain|secure)$/i.test(key)) {
             return false;
         } else {
-            if (typeof value === "object") {
-                value = JSON.stringify(value);
-            }
-            if (expiration) {
-                switch (expiration.constructor) {
-                case Number:
-                    expires = expiration === Infinity ? neverExpires : "; max-age=" + expiration;
-                    break;
-                case String:
-                    expires = "; expires=" + expiration;
-                    break;
-                case Date:
-                    expires = "; expires=" + expiration.toUTCString();
-                    break;
-                default:
-                    expires = neverExpires;
-                    break;
-                }
+            if (value === null) {
+                document.cookie = encodeURIComponent(key) + "=; expires=Thu, 01 Jan 1970 00:00:00 GMT" + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "");
             } else {
-                expires = neverExpires;
+                if (typeof value === "object") {
+                    value = JSON.stringify(value);
+                }
+                if (expiration) {
+                    switch (expiration.constructor) {
+                    case Number:
+                        expires = expiration === Infinity ? neverExpires : "; max-age=" + expiration;
+                        break;
+                    case String:
+                        expires = "; expires=" + expiration;
+                        break;
+                    case Date:
+                        expires = "; expires=" + expiration.toUTCString();
+                        break;
+                    default:
+                        expires = neverExpires;
+                        break;
+                    }
+                } else {
+                    expires = neverExpires;
+                }
+                document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value) + expires + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "") + (isSecure ? "; secure" : "");
             }
-            document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value) + expires + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "") + (isSecure ? "; secure" : "");
             return true;
         }
     };
@@ -1270,11 +1289,11 @@
      *   1. use authToken provided as a parameter to `enginesis.init()`
      *   2. else, use authtok provided as a query to the current page
      *   3. else, use authToken saved in enginesis session cookie
+     * @param {string} authToken can be specified if one is being passed around, but it still requires validation.
      * @returns {boolean} true if a user is restored this way, false if not.
      */
-    function restoreUserFromAuthToken () {
+    function restoreUserFromAuthToken (authToken) {
         var queryParameters;
-        var authToken = enginesis.authToken;
         var userInfo;
         var wasRestored = false;
 
@@ -1284,12 +1303,12 @@
                 authToken = queryParameters.authtok;
                 debugLog("restoreUserFromAuthToken from query: " + authToken);
             }
+            if (isEmpty(authToken)) {
+                authToken = cookieGet(enginesis.SESSION_COOKIE);
+                debugLog("restoreUserFromAuthToken from cookie: " + authToken);
+            }
         } else {
             debugLog("restoreUserFromAuthToken from parameter: " + authToken);
-        }
-        if (isEmpty(authToken)) {
-            authToken = cookieGet(enginesis.SESSION_COOKIE);
-            debugLog("restoreUserFromAuthToken from cookie: " + authToken);
         }
         if ( ! isEmpty(authToken)) {
             // TODO: Validate the token (for now we are accepting that it is valid but we should check!) If the authToken is valid then we can trust the userInfo
@@ -1300,14 +1319,11 @@
                 if (userInfo != null) {
                     enginesis.authToken = authToken;
                     enginesis.authTokenWasValidated = true;
-                    enginesis.loggedInUserInfo.userId = Math.floor(userInfo.user_id);
-                    enginesis.loggedInUserInfo.userName = userInfo.user_name;
-                    enginesis.loggedInUserInfo.accessLevel = Math.floor(userInfo.access_level);
-                    enginesis.loggedInUserInfo.siteUserId = userInfo.site_user_id;
+                    enginesis.loggedInUserInfo = userInfo;
                     enginesis.networkId = Math.floor(userInfo.network_id);
                     wasRestored = true;
                 }
-                debugLog("restoreUserFromAuthToken valid user: " + enginesis.loggedInUserInfo.userName + "(" + enginesis.loggedInUserInfo.userId + ")");
+                debugLog("restoreUserFromAuthToken valid user: " + enginesis.loggedInUserInfo.user_name + "(" + enginesis.loggedInUserInfo.user_id + ")");
             } else {
                 // if we have an authtoken but we did not cache the user info, then
                 // if we trust that token, we need to log this user in
@@ -1323,7 +1339,8 @@
      * Remove the local cache of user info.
      */
     function clearUserSessionInfo() {
-        removeObjectWithKey(enginesis.SESSION_COOKIE);
+        removeObjectWithKey(enginesis.SESSION_USERINFO);
+        cookieSet(enginesis.SESSION_USERINFO, null, 0, "/", "", false);
         initializeLocalSessionInfo();
     }
 
@@ -1346,36 +1363,30 @@
             enginesis.authTokenExpires = new Date(sessionInfo.expires);
             enginesis.refreshToken = sessionInfo.refreshToken;
             enginesis.authTokenWasValidated = true;
+            var hash = sessionMakeHash();
+            var cr = enginesis.loggedInUserInfo.cr;
+            // TODO: verify hashes agree?
+            saveObjectWithKey(enginesis.SESSION_USERINFO, enginesis.loggedInUserInfo);
+            debugLog("enginesis.saveUserSessionInfo session id is " + enginesis.sessionId + " cr=" + cr + " hash=" + hash);
         } else {
             haveValidSession = false;
         }
-        console.log("enginesis.saveUserSessionInfo session id is " + enginesis.sessionId);
+        return haveValidSession;
+    }
 
-        var success = true;
-        var hash = sessionMakeHash();
-        var loggedInUserInfo = enginesis.loggedInUserInfo;
-        var userInfoToSave = {
-            userId: loggedInUserInfo.userId,
-            userName: loggedInUserInfo.userName,
-            siteUserId: loggedInUserInfo.siteUserId,
-            networkId: enginesis.networkId,
-            siteKey: enginesis.siteKey,
-            accessLevel: loggedInUserInfo.accessLevel,
-            rank: loggedInUserInfo.rank,
-            experiencePoints: loggedInUserInfo.experiencePoints,
-            loginDate: loggedInUserInfo.loginDate,
-            email: loggedInUserInfo.email,
-            location: loggedInUserInfo.location,
-            country: loggedInUserInfo.country,
-            sessionId: haveValidSession ? enginesis.sessionId : null,
-            sessionExpires: haveValidSession ? enginesis.sessionExpires.toJSON() : null,
-            authToken: haveValidSession ? enginesis.authToken : null,
-            authTokenExpires: haveValidSession ? enginesis.authTokenExpires.toJSON() : null,
-            refreshToken: enginesis.refreshToken,
-            cr: hash
-        };
-        saveObjectWithKey(enginesis.SESSION_COOKIE, userInfoToSave);
-        return success;
+    /**
+     * Restore a prior user session if one can be determined. If an Enginesis authentication token is provided,
+     * use it to validate the user. If the token is not provided or it is not valid, attempt to use a prior
+     * local storage or browser cookie.
+     * @param {string} authToken If an Enginesis authentication token is provided use it to validate the user.
+     */
+    function restoreUserSession(authToken) {
+        if ( ! restoreUserFromAuthToken(authToken)) {
+            restoreUserSessionInfo();
+        }
+        if ( ! enginesis.isUserLoggedIn()) {
+            anonymousUserLoad();
+        }
     }
 
     /**
@@ -1385,10 +1396,15 @@
      * @returns {boolean} true if the save was successful, otherwise false.
      */
     function restoreUserSessionInfo() {
-        var success = false;
-        var loggedInUserInfo = enginesis.loggedInUserInfo;
         var hash;
-        var userInfoSaved = loadObjectWithKey(enginesis.SESSION_COOKIE);
+        var success = false;
+        var userInfoSaved = loadObjectWithKey(enginesis.SESSION_USERINFO);
+        if (userInfoSaved == null) {
+            userInfoSaved = cookieGet(enginesis.SESSION_USERINFO);
+            if (userInfoSaved != null) {
+                userInfoSaved = JSON.parse(userInfoSaved);
+            }
+        }
         if (userInfoSaved != null) {
             hash = sessionMakeHash({
                 siteId: enginesis.siteId,
@@ -1396,31 +1412,26 @@
                 userName: userInfoSaved.userName,
                 siteUserId: userInfoSaved.siteUserId || "",
                 accessLevel: userInfoSaved.accessLevel,
-                siteKey: userInfoSaved.siteKey
+                siteKey: enginesis.developerKey
             });
             // TODO: verify hash to verify the payload was not tampered.
-            // TODO: verify session, auth token, if no longer valid try to refresh the session.
+            // TODO: verify session, authtok, but if expired try to refresh the session.
             if (hash != userInfoSaved.cr) {
                 debugLog("restoreUserSessionInfo hash does not match. From server: " + userInfoSaved.cr + ". Computed here: " + hash);
             }
-            loggedInUserInfo.userId = userInfoSaved.userId;
-            loggedInUserInfo.userName = userInfoSaved.userName;
-            loggedInUserInfo.siteUserId = userInfoSaved.siteUserId || "";
+            enginesis.loggedInUserInfo = userInfoSaved;
             enginesis.networkId = userInfoSaved.networkId;
-            enginesis.siteKey = userInfoSaved.siteKey;
-            loggedInUserInfo.accessLevel = userInfoSaved.accessLevel;
-            loggedInUserInfo.rank = userInfoSaved.rank;
-            loggedInUserInfo.experiencePoints = userInfoSaved.experiencePoints;
-            loggedInUserInfo.loginDate = userInfoSaved.loginDate;
-            loggedInUserInfo.email = userInfoSaved.email;
-            loggedInUserInfo.location = userInfoSaved.location;
-            loggedInUserInfo.country = userInfoSaved.country;
             enginesis.sessionId = userInfoSaved.sessionId;
             enginesis.sessionExpires = new Date(userInfoSaved.sessionExpires);
             enginesis.authToken = userInfoSaved.authToken;
             enginesis.authTokenExpires = new Date(userInfoSaved.authTokenExpires);
             enginesis.refreshToken = userInfoSaved.refreshToken;
-            console.log("enginesis.restoreUserSessionInfo " + enginesis.sessionId);
+            debugLog("enginesis.restoreUserSessionInfo " + enginesis.sessionId + " from " + JSON.stringify(userInfoSaved));
+        } else if (enginesis.isUserLoggedIn()) {
+            // if a user was not cached and we trust the authtok then we need to load this user
+            debugLog("enginesis.restoreUserSessionInfo we think the user is logged in but wasn't cached");
+        } else {
+            debugLog("enginesis.restoreUserSessionInfo no prior user");
         }
         return success;
     }
@@ -1459,13 +1470,13 @@
                 sessionExpired = Date.now().valueOf() > (sessionExpireTime.valueOf() - timeZoneOffset);
                 hash = sessionMakeHash({
                     siteId: enginesis.siteId,
-                    userId: loggedInUserInfo.userId,
-                    userName: loggedInUserInfo.userName,
-                    siteUserId: loggedInUserInfo.siteUserId || "",
-                    accessLevel: loggedInUserInfo.accessLevel,
-                    siteKey: enginesis.siteKey
+                    userId: loggedInUserInfo.user_id,
+                    userName: loggedInUserInfo.user_name,
+                    siteUserId: loggedInUserInfo.site_user_id || "",
+                    accessLevel: loggedInUserInfo.access_level,
+                    siteKey: enginesis.developerKey
                 });
-                hashMatched = (hash == userInfoSaved.cr) && loggedInUserInfo.userId == userInfoSaved.userId;
+                hashMatched = (hash == userInfoSaved.cr) && (Math.floor(loggedInUserInfo.user_id) == Math.floor(userInfoSaved.user_id));
                 if ( ! sessionExpired && hashMatched) {
                     isRefreshed = true;
                     resolve(isRefreshed);
@@ -2190,7 +2201,7 @@
      * @returns {boolean}
      */
     enginesis.isUserLoggedIn = function () {
-        return enginesis.loggedInUserInfo.userId != 0 && enginesis.authToken != "" && enginesis.authTokenWasValidated;
+        return enginesis.loggedInUserInfo && Math.floor(enginesis.loggedInUserInfo.user_id) > 0 && enginesis.authToken != "" && enginesis.authTokenWasValidated;
     };
 
     /**
@@ -2198,7 +2209,7 @@
      * @returns {integer} current logged in user id or 0 if no user is logged in.
      */
     enginesis.userIdGet = function() {
-        return enginesis.isUserLoggedIn() ? enginesis.loggedInUserInfo.userId : 0;
+        return enginesis.isUserLoggedIn() ? Math.floor(enginesis.loggedInUserInfo.user_id) : 0;
     }
 
     /**
@@ -2207,7 +2218,7 @@
      * @returns {boolean} true if the result is considered an Enginesis result object, otherwise false.
      */
     enginesis.isEnginesisResult = function (enginesisResult) {
-        return enginesisResult && enginesisResult.hasOwnProperty('results') && enginesisResult.results.hasOwnProperty('status') && enginesisResult.results.status.hasOwnProperty('success');
+        return enginesisResult && enginesisResult.hasOwnProperty("results") && enginesisResult.results.hasOwnProperty("status") && enginesisResult.results.status.hasOwnProperty("success");
     };
 
     /**
@@ -2335,31 +2346,23 @@
     };
 
     /**
-     * Return an object of user information. If no user is logged in a valid object is still returned but with invalid user info.
+     * Return an object of user information. If no user is logged in a valid object is still returned 
+     * but with invalid user info. Note we do not hand out `loggedInUserInfo` because there are 
+     * certain properties we do not want clients to access or change.
      * @returns {object}
      */
     enginesis.getLoggedInUserInfo = function () {
-        return {
-            isLoggedIn: enginesis.isUserLoggedIn(),
-            userId: enginesis.loggedInUserInfo.userId,
-            userName: enginesis.loggedInUserInfo.userName,
-            fullName: enginesis.loggedInUserInfo.fullName,
-            rank: enginesis.loggedInUserInfo.rank,
-            level: enginesis.loggedInUserInfo.level,
-            experiencePoints: enginesis.loggedInUserInfo.experiencePoints,
-            coins: enginesis.loggedInUserInfo.coins,
-            loginDate: enginesis.loggedInUserInfo.loginDate,
-            email: enginesis.loggedInUserInfo.email,
-            location: enginesis.loggedInUserInfo.location,
-            country: enginesis.loggedInUserInfo.country,
-            siteUserId: enginesis.loggedInUserInfo.siteUserId,
-            networkId: enginesis.networkId,
-            accessLevel: enginesis.loggedInUserInfo.accessLevel,
-            gender: enginesis.loggedInUserInfo.gender,
-            dateOfBirth: enginesis.loggedInUserInfo.dateOfBirth,
-            accessToken: enginesis.authToken,
-            tokenExpiration: enginesis.tokenExpirationDate
-        };
+        if (enginesis.isUserLoggedIn()) {
+            var userInfo = {};
+            for (var property in enginesis.loggedInUserInfo) {
+                if (enginesis.loggedInUserInfo.hasOwnProperty(property)) {
+                    userInfo[property] = enginesis.loggedInUserInfo[property];
+                }
+            }
+            return userInfo;
+        } else {
+            return null;
+        }
     };
 
     /**
@@ -2783,7 +2786,7 @@
     enginesis.sendToFriend = function(fromAddress, fromName, toAddress, userMessage, lastScore, overRideCallBackFunction) {
         var errorCode = "";
         var service = "GameDataCreate";
-        if (( ! enginesis.authTokenWasValidated || enginesis.loggedInUserInfo.userId == 0) && (isEmpty(fromAddress) || isEmpty(fromName))) {
+        if (( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) && (isEmpty(fromAddress) || isEmpty(fromName))) {
             // if not logged in, fromAddress, fromName must be provided. Otherwise we get it on the server from the logged in user info.
             errorCode = "INVALID_PARAM";
         } else if (isEmpty(enginesis.gameId)) {
@@ -3002,7 +3005,7 @@
         // verify user is logged in, cannot submit a score if no one is logged in. A logged in user
         // should also have a valid session (SessionBegin must have been called). And of course a
         // game-id is required.
-        if ( ! enginesis.authTokenWasValidated || enginesis.loggedInUserInfo.userId == 0) {
+        if ( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) {
             errorCode = "NOT_LOGGED_IN";
         } else if (sessionId == null) {
             errorCode = "INVALID_SESSION";
@@ -3015,7 +3018,7 @@
             }
         }
         if (errorCode == "") {
-            submitString = encryptScoreSubmit(enginesis.siteId, enginesis.loggedInUserInfo.userId, gameId, score, gameData, timePlayed, sessionId);
+            submitString = encryptScoreSubmit(enginesis.siteId, enginesis.loggedInUserInfo.user_id, gameId, score, gameData, timePlayed, sessionId);
             if (submitString == null) {
                 errorCode = "INVALID_PARAM";
             }
@@ -3252,7 +3255,7 @@
     };
 
     /**
-     * Logout the current logged in user. This invalidates any session data we are holding
+     * Log out the current logged in user. This invalidates any session data we are holding
      * both locally and on the server.
      * @returns {Promise} A promise that resolves with the server's response.
      */
@@ -3354,7 +3357,7 @@
      */
     enginesis.avatarURL = function (size, userId) {
         if (userId == 0) {
-            userId = enginesis.loggedInUserInfo.userId;
+            userId = enginesis.loggedInUserInfo ? enginesis.loggedInUserInfo.user_id : 0;
         }
         // TODO: Size is determined by site_data, sites could have different sizes
         if (size < 0) {

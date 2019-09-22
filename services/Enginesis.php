@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.4.70');
+    define('ENGINESIS_VERSION', '2.4.71');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -96,6 +96,7 @@ class Enginesis
         $this->m_networkId = 1;
         $this->m_userAccessLevel = 0;
         $this->m_isLoggedIn = false;
+        $this->m_refreshedUserInfo = null;
         $this->m_syncId = 0;
         $this->m_gameId = 0;
         $this->m_gameGroupId = 0;
@@ -363,11 +364,15 @@ class Enginesis
     }
 
     /**
-     * Return the user info object we discovered when we refreshed the session.
-     * @return object|null user info object if the session was refreshed.
+     * Return the user info object from login or when a session was refreshed.
+     * @return object|null user info object if a user is logged in.
      */
-    public function getRefreshedUserInfo() {
-        return $this->m_refreshedUserInfo;
+    public function getLoggedInUserInfo() {
+        if ($this->m_refreshedUserInfo != null) {
+            return $this->m_refreshedUserInfo;
+        } else {
+            return $this->sessionUserInfoGet();
+        }
     }
 
     /**
@@ -892,7 +897,6 @@ class Enginesis
             $this->m_isLoggedIn = true;
             $_COOKIE[SESSION_COOKIE] = $authenticationToken;
             $GLOBALS[SESSION_USERID_CACHE] = $user_id;
-            $_POST['authtok'] = $authenticationToken; // TODO: not sure about this
         }
         return $rc;
     }
@@ -933,6 +937,7 @@ class Enginesis
         if (isset($_COOKIE[SESSION_USERINFO])) {
             try {
                 $userInfo = json_decode($_COOKIE[SESSION_USERINFO]);
+                // TODO: Validate this user data make sure it was not tampered, check if expired.
             } catch (Exception $e) {
                 $this->setLastError('CANNOT_GET_USERINFO', 'sessionUserInfoGet could not get cookie: ' . $e->getMessage());
             }
@@ -954,6 +959,7 @@ class Enginesis
             if (isset($userInfo->refreshToken)) {
                 $this->saveRefreshToken($userInfo->refreshToken);
             }
+            $this->m_refreshedUserInfo = $userInfo;
         }
         return $userInfo;
     }
@@ -973,6 +979,7 @@ class Enginesis
         $this->m_networkId = 1;
         $this->m_userAccessLevel = 0;
         $this->m_isLoggedIn = false;
+        $this->m_refreshedUserInfo = null;
         if ( ! headers_sent()) {
             if (setcookie(SESSION_COOKIE, null, time() - $sessionExpireTime, '/', $this->sessionCookieDomain()) === false) {
                 $rc = 'CANNOT_SET_SESSION';
@@ -1472,27 +1479,19 @@ class Enginesis
      * logged in then save the session cookie that allows us to converse with the server without logging in each time.
      * @param $userName: string the user's name or email address
      * @param $password: string the user's password
-     * @param $saveSession boolean true to save this session in a cookie for the next page load to read back. Typically linked to a Remember Me checkbox.
      * @return object: null if login fails, otherwise returns the user info object.
      */
-    public function userLogin ($userName, $password, $saveSession) {
+    public function userLogin ($userName, $password) {
         $userInfo = null;
         $service = 'UserLogin';
         $parameters = [
             'user_name' => $userName,
             'password' => $password
         ];
-        if ( ! isset($saveSession)) {
-            $saveSession = true;
-        }
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && isset($results->row)) {
             $userInfo = $this->sessionRestoreFromResponse($results);
-        }
-        if ($saveSession) {
-            // TODO: Save session info in a cookie so that it is available on the next page load
-            // setcookie(REFRESH_COOKIE, null, time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain());
         }
         return $userInfo;
     }
