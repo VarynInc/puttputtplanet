@@ -125,6 +125,13 @@ function currentPageName() {
 }
 
 /**
+ * Return the full URL of the page we are currently on.
+ */
+function currentPageURL() {
+    return getServiceProtocol() . '://' . serverName() . $_SERVER['REQUEST_URI'];
+}
+
+/**
  * Append a query parameter on to the end of a URL string. This helper function handles
  * the edge cases.
  * @param $url {string} The initial URL. Can be null or empty string.

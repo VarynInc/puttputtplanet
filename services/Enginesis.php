@@ -707,8 +707,10 @@ class Enginesis
                 $this->m_siteUserId = $sessionSiteUserId;
                 $this->m_networkId = $sessionNetworkId;
                 $this->m_userAccessLevel = $sessionAccessLevel;
-                $this->m_authToken = $this->authTokenMake($sessionSiteId, $sessionUserId, $sessionUserName, $sessionSiteUserId, $sessionAccessLevel, $sessionNetworkId);
+                $this->m_authToken = $authToken;
                 $this->m_authTokenWasValidated = true;
+                $this->m_isLoggedIn = true;
+                $this->m_refreshedUserInfo = $this->sessionUserInfoGet();
                 $status = EnginesisRefreshStatus::valid;
             } elseif ($errorCode == EnginesisErrors::TOKEN_EXPIRED) {
                 // if the auth token is expired we need to ask the server for a new one IF we have the refresh token
@@ -1122,6 +1124,7 @@ class Enginesis
         echo("<p>Network-id: $this->m_networkId</p>");
         echo("<p>User logged in: " . ($this->m_isLoggedIn ? 'YES' : 'NO') . "</p>");
         echo("<p>Last error: " . ($this->m_lastError ? implode(', ', $this->m_lastError) : 'null') . "</p>");
+        var_dump($this->m_refreshedUserInfo);
     }
 
     /**
@@ -1672,26 +1675,7 @@ class Enginesis
         if ($results != null) {
             $user_id = $results->row->user_id;
             $secondary_password = $results->row->secondary_password;
-            $userInfoResult = array(
-                'user_id' => $user_id,
-                'network_id' => $userInfo['network_id'],
-                'access_level' => 10,
-                'user_name' => $userInfo['user_name'],
-                'email_address' => $userInfo['email_address'],
-                'full_name' => $userInfo['real_name'],
-                'city' => $userInfo['city'],
-                'state' => $userInfo['state'],
-                'zipcode' => $userInfo['zipcode'],
-                'country_code' => $userInfo['country_code'],
-                'tagline' => $userInfo['tagline'],
-                'about_me' => $userInfo['about_me'],
-                'additional_info' => $userInfo['additional_info'],
-                'gender' => $userInfo['gender'],
-                'dob' => $userInfo['dob'],
-                'mobile_number' => $userInfo['mobile_number'],
-                'im_id' => $userInfo['im_id'],
-                'secondary_password' => $secondary_password
-            );
+            $userInfoResult = $result->row;
             // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
             // We know this because the server gives us the token when we are to do this.
             if (isset($results->row->authtok)) {
@@ -1760,7 +1744,6 @@ class Enginesis
             // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
             // We know this because the server gives us the token when we are to do this.
             if (isset($results->authtok)) {
-                $userInfoResult['authtok'] = $results->authtok;
                 $this->sessionSave($results->authtok, $results->user_id, $results->user_name, $results->site_user_id, $results->access_level, EnginesisNetworks::Enginesis);
                 $this->sessionUserInfoSave($results);
             }
