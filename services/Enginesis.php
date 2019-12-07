@@ -29,8 +29,9 @@ abstract class EnginesisNetworks {
     const Friendster = 9;
     const MySpace = 10;
     const Twitter = 11;
-    const Hi5 = 11;
-    const AOL = 12;
+    const Hi5 = 12;
+    const AOL = 13;
+    const Apple = 14;
 }
 
 abstract class EnginesisRefreshStatus {
@@ -112,7 +113,7 @@ class Enginesis
         $this->setServerPaths();
         $this->setServiceRoot($enginesisServer);
         $this->m_serviceEndPoint = $this->m_serviceRoot . 'index.php';
-        $this->m_avatarEndPoint = $this->m_serviceRoot . 'avatar.php';
+        $this->m_avatarEndPoint = $this->m_serviceRoot . 'avatar/';
         $this->restoreUserFromAuthToken(null);
     }
 

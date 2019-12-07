@@ -1585,7 +1585,7 @@ function getExtension ($fileName) {
  * Generate a random string of base64 characters of the requested length. I have no
  * idea where this algorithm came from or how effective it is.
  * @param int $length
- * @return string
+ * @return string The requested string length of characters [/0-9A-Za-z\-\.]+/
  */
 function makeRandomToken ($length = 12) {
     $token = '';
@@ -1593,17 +1593,17 @@ function makeRandomToken ($length = 12) {
         if ($i % 2 == 0) {
             mt_srand(time() % 2147 * 1000000 + (double) microtime() * 1000000);
         }
-        $rand = 48 + mt_rand() % 64;
+        $rand = 48 + mt_rand() % 64; // 48 is "0"
         if ($rand > 57) {
-            $rand += 7;
+            $rand += 7; // move to "A"
         }
         if ($rand > 90) {
-            $rand += 6;
+            $rand += 6; // move to "a"
         }
         if ($rand == 123) {
-            $rand = 45;
+            $rand = 45; // "-"
         } elseif ($rand == 124) {
-            $rand = 46;
+            $rand = 46; // "."
         }
         $token .= chr($rand);
     }
