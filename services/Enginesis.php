@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.4.71');
+    define('ENGINESIS_VERSION', '2.4.72');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -1435,6 +1435,13 @@ class Enginesis
     public function sessionBegin ($gameId, $gameKey) {
         $service = 'SessionBegin';
         $userInfo = null;
+        if (isEmpty($gameId)) {
+            $gameId = $this->m_gameId;
+            $gameKey = gameKeyMake($this->m_siteId, $gameId);
+        }
+        if (isEmpty($gameKey)) {
+            $gameKey = gameKeyMake($this->m_siteId, $gameId);
+        }
         $parameters = [
             'game_id' => $gameId,
             'game_key' => $gameKey
@@ -1467,8 +1474,10 @@ class Enginesis
         }
         // When refreshing the token we need to remind the server who the user is
         $parameters = [
-            'token' => $refreshToken,
-            'logged_in_user_id' => $this->m_userId
+            'authtok' => $refreshToken,
+            'logged_in_user_id' => $this->m_userId,
+            'game_id' => $this->m_gameId,
+            'gamekey' => gameKeyMake($this->m_siteId, $this->m_gameId)
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
