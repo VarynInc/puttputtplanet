@@ -28,7 +28,7 @@
     "use strict";
 
     var enginesis = {
-        VERSION: "2.4.71",
+        VERSION: "2.6.2",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -82,7 +82,8 @@
             Enginesis: 1,
             Facebook:  2,
             Google:    7,
-            Twitter:  11
+            Twitter:  11,
+            Apple:    14
         }
     };
 
@@ -166,7 +167,7 @@
     }
 
     /**
-     * Coerce a value to its boolean equivelent, causing the value to be interpreted as its 
+     * Coerce a value to its boolean equivelent, causing the value to be interpreted as its
      * boolean intention. This works very different that the JavaScript coercion. For example,
      * "0" == true and "false" == true in JavaScript but here "0" == false and "false" == false.
      * @param {*} value A value to test.
@@ -258,7 +259,7 @@
         if (enginesisResult && enginesisResult.results && enginesisResult.results.status) {
             return enginesisResult.results.status.message;
         } else {
-            return "INVALID_PARAM";
+            return "INVALID_PARAMETER";
         }
     }
 
@@ -284,13 +285,17 @@
      * TODO: Consider language code.
      */
     function validGender(gender) {
-        gender = gender.toUpperCase();
-        if (gender[0] == "M") {
-            gender = "M";
-        } else if (gender[0] == "F") {
-            gender = "F";
-        } else {
+        if (isEmpty(gender)) {
             gender = "U";
+        } else {
+            gender = gender.toUpperCase();
+            if (gender[0] == "M") {
+                gender = "M";
+            } else if (gender[0] == "F") {
+                gender = "F";
+            } else {
+                gender = "U";
+            }
         }
         return gender;
     }
@@ -324,7 +329,7 @@
      * When the server responds, intercept any result we get so we can preprocess it before
      * sending it off to the callback function. This may require different logic for different
      * services.
-     * @param {Object} enginesisResult 
+     * @param {Object} enginesisResult
      */
     function preprocessEnginesisResult(enginesisResult) {
         var serviceEndPoint = enginesisResult.fn;
@@ -347,7 +352,7 @@
 
     /**
      * Verify the hash provided in the response matches the response.
-     * @param {object} sessionInfo 
+     * @param {object} sessionInfo
      */
     function validateGameSessionHash(sessionInfo) {
         var cr = sessionInfo.cr || "";
@@ -377,6 +382,13 @@
                 refreshSuccessful = false;
             }
             refreshSuccessful = saveUserSessionInfo(sessionInfo);
+        } else {
+            var errorCode = resultErrorCode(enginesisResult);
+            if (errorCode == "INVALID_PARAMETER" || errorCode == "INVALID_TOKEN") {
+                // if the refresh token is invalid then log this user out or else
+                // we will keep trying this bad token on every request.
+                clearUserSessionInfo();
+            }
         }
         return refreshSuccessful;
     }
@@ -479,11 +491,14 @@
                 // to compute a new one.
                 debugLog("updateLoggedInUserInfo hash does not match. From server: " + userInfo.cr + ". Computed here: " + sessionMakeHash());
             }
-            
+            // after a log in save the refresh token separately from the session.
+            _saveRefreshToken(userInfo.refresh_token);
+
             // Move server authorized user data into the local cache
             enginesis.loggedInUserInfo = userInfo;
             enginesis.networkId = userInfo.network_id;
             updated = saveUserSessionInfo(userInfo);
+
 // This is what we get back from the server call:
 // {"user_id":"10240","site_id":"106","user_name":"Killer","real_name":"Varyn System",
 // "site_user_id":null,"network_id":"1","dob":"1955-08-06","gender":"M","city":"New York, NY",
@@ -496,7 +511,7 @@
 // "session_id":"0534511005bb686f4caa1c89b54aa4c0",
 // "cr":"9f484790464cc88340d99fd24d5aa8d6",
 // "authtok":"OYTfmLLEBX4\/7RWWq4piX j44uf2Ezv 8SoDTzxuZ7gXkJ1MvHFplU2Ug2mOLTlAPl5h\/PqRqLF JMs7AyxXJ6pFxQfKW0u i2mVWZAwye4IPbPHz0A1UX8t9KfP\/zYn",
-// "refreshToken":"blDRMDfGtQXZSuMMTo4hXbltsEIhS2kqcfvma\/eoBV0QNfUt1YixXucGeJL xX4\/uBCeuYnG0RE7e7zggxzcnS5L5Z4S6pPJKYlXQV1iAPWtA6d7vQH8Rau90eRV\/Gq3",
+// "refresh_token":"blDRMDfGtQXZSuMMTo4hXbltsEIhS2kqcfvma\/eoBV0QNfUt1YixXucGeJL xX4\/uBCeuYnG0RE7e7zggxzcnS5L5Z4S6pPJKYlXQV1iAPWtA6d7vQH8Rau90eRV\/Gq3",
 // "expires":"2019-03-28 21:27:01"}
         }
         return updated;
@@ -504,7 +519,7 @@
 
     /**
      * After a successful logout clear everything we know about the user.
-     * @param {object} enginesisResult 
+     * @param {object} enginesisResult
      */
     function clearLoggedInUserInfo(enginesisResult) {
         if (enginesisResult && enginesisResult.results && enginesisResult.results.result.row) {
@@ -542,7 +557,7 @@
 
         // s=106&u=undefined&d=9079&n=undefined&g=1105&i=&l=undefined&m=0&k=null
         // TODO: siteKey is null, where is that coming from????
-        
+
         var dayStamp = userInfo.dayStamp || sessionDayStamp();
         var siteMark = 0;
         if (isNull(siteUserId)) {
@@ -666,6 +681,19 @@
         return serviceQueue;
     }
 
+    function formatHTTPHeader() {
+        // TODO: set "multipart/form" when sending files
+        var httpHeaders = {
+            "User-Agent": "Enginesis JS client " + enginesis.VERSION,
+            "Accept": "application/json",
+            "X-DeveloperKey": enginesis.developerKey
+        };
+        if (enginesis.authTokenWasValidated) {
+            httpHeaders["Authentication"] = "Bearer " + enginesis.authToken;
+        }
+        return httpHeaders;
+    }
+
     /**
      * If we cannot use fetch() on this browser then fall back to XMLHTTPRequest.
      * @param serviceName {string}
@@ -718,11 +746,9 @@
         enginesis.nodeRequest.post({
             method: "POST",
             url: enginesis.siteResources.serviceURL,
-            form: convertParamsToFormData(enginesisParameters),
-            headers: {
-                "User-Agent": "Enginesis client",
-                "Content-Type": "application/x-www-form-urlencoded"
-            }}, function(requestError, response, body) {
+            body: convertParamsToFormData(enginesisParameters),
+            headers: formatHTTPHeader()
+        }, function(requestError, response, body) {
                 if (requestError != null) {
                     var errorMessage = "Error posting to " + enginesis.siteResources.serviceURL + ": " + requestError.toString();
                     if (setOffline()) {
@@ -776,73 +802,71 @@
                         mode: "cors",
                         cache: "no-cache",
                         credentials: "same-origin",
-                        headers: {
-                            Accept: "application/json"
-                        },
+                        headers: formatHTTPHeader(),
                         body: convertParamsToFormData(enginesisParameters)
                     })
-                        .then(function (response) {
-                            removeFromServiceQueue(enginesisParameters.state_seq);
-                            if (response.status == 200) {
-                                response.json().then(function (enginesisResult) {
-                                        var errorMessage;
-                                        if (enginesisResult == null) {
-                                            // If Enginesis fails to return a valid object then the service must have failed, possible the response was not parsable JSON (e.g. error 500)
-                                            var serverResponse = response.text();
-                                            debugLog("Enginesis service error for " + serviceName + ": " + serverResponse);
-                                            errorMessage = "Enginesis service while contacting Enginesis at " + enginesis.serverHost + " for " + serviceName;
-                                            enginesisResult = forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "SERVICE_ERROR", errorMessage);
-                                        } else {
-                                            enginesisResult.fn = serviceName;
-                                        }
-                                        callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
-                                    })
-                                    .catch(function (error) {
-                                        var errorMessage = "Invalid response from Enginesis at " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
-                                        var enginesisResult = forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "SERVICE_ERROR", errorMessage);
-                                        debugLog(errorMessage);
-                                        callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
-                                    });
-                            } else {
-                                var errorMessage = "Network error " + response.status + " while contacting Enginesis at " + enginesis.serverHost + " for " + serviceName;
-                                var enginesisResult = forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "SERVICE_ERROR", errorMessage);
-                                debugLog(errorMessage);
-                                callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
-                            }
-                        }, function (error) {
-
-                            // TODO: If the error is no network, then set offline and queue this request
-
-                            if (setOffline()) {
-                                errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
-                            } else {
-                                errorMessage = "Enginesis is already offline, leaving this message on the queue.";
-                            }
+                    .then(function (response) {
+                        removeFromServiceQueue(enginesisParameters.state_seq);
+                        if (response.status == 200) {
+                            response.json().then(function (enginesisResult) {
+                                    var errorMessage;
+                                    if (enginesisResult == null) {
+                                        // If Enginesis fails to return a valid object then the service must have failed, possible the response was not parsable JSON (e.g. error 500)
+                                        var serverResponse = response.text();
+                                        debugLog("Enginesis service error for " + serviceName + ": " + serverResponse);
+                                        errorMessage = "Enginesis service while contacting Enginesis at " + enginesis.serverHost + " for " + serviceName;
+                                        enginesisResult = forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "SERVICE_ERROR", errorMessage);
+                                    } else {
+                                        enginesisResult.fn = serviceName;
+                                    }
+                                    callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
+                                })
+                                .catch(function (error) {
+                                    var errorMessage = "Invalid response from Enginesis at " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
+                                    var enginesisResult = forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "SERVICE_ERROR", errorMessage);
+                                    debugLog(errorMessage);
+                                    callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
+                                });
+                        } else {
+                            var errorMessage = "Network error " + response.status + " while contacting Enginesis at " + enginesis.serverHost + " for " + serviceName;
+                            var enginesisResult = forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "SERVICE_ERROR", errorMessage);
                             debugLog(errorMessage);
-                            callbackPriority(
-                                forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "OFFLINE", errorMessage),
-                                resolve,
-                                overRideCallBackFunction,
-                                enginesis.callBackFunction
-                            );
-                        })
-                        .catch(function (error) {
+                            callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
+                        }
+                    }, function (error) {
 
-                            // TODO: If the error is no network, then set offline and queue this request
+                        // TODO: If the error is no network, then set offline and queue this request
 
-                            if (setOffline()) {
-                                errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
-                            } else {
-                                errorMessage = "Enginesis is already offline, leaving this message on the queue.";
-                            }
-                            debugLog(errorMessage);
-                            callbackPriority(
-                                forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "OFFLINE", errorMessage),
-                                resolve,
-                                overRideCallBackFunction,
-                                enginesis.callBackFunction
-                            );
-                        });
+                        if (setOffline()) {
+                            errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
+                        } else {
+                            errorMessage = "Enginesis is already offline, leaving this message on the queue.";
+                        }
+                        debugLog(errorMessage);
+                        callbackPriority(
+                            forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "OFFLINE", errorMessage),
+                            resolve,
+                            overRideCallBackFunction,
+                            enginesis.callBackFunction
+                        );
+                    })
+                    .catch(function (error) {
+
+                        // TODO: If the error is no network, then set offline and queue this request
+
+                        if (setOffline()) {
+                            errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
+                        } else {
+                            errorMessage = "Enginesis is already offline, leaving this message on the queue.";
+                        }
+                        debugLog(errorMessage);
+                        callbackPriority(
+                            forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "OFFLINE", errorMessage),
+                            resolve,
+                            overRideCallBackFunction,
+                            enginesis.callBackFunction
+                        );
+                    });
                 } else if (enginesis.isNodeBuild) {
                     sendNodeRequest(serviceName, enginesisParameters, function (enginesisResult) {
                         callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
@@ -892,7 +916,7 @@
                     enginesisResult = forceErrorResponseObject(serviceName, 0, "DISABLED", "Enginesis is disabled.");
                 } else {
                     enginesisResult = forceErrorResponseObject(serviceName, 0, "VALIDATION_FAILED", "Enginesis internal state failed validation.");
-                }                
+                }
                 callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
             }
         });
@@ -923,11 +947,7 @@
             response: "json"
         };
         if (enginesis.loggedInUserInfo && enginesis.authTokenWasValidated && Math.floor(enginesis.loggedInUserInfo.user_id) != 0) {
-            serverParams.logged_in_user_id = enginesis.loggedInUserInfo.user_id;
             serverParams.authtok = enginesis.authToken;
-            if (isNull(serverParams.user_id)) {
-                serverParams.user_id = enginesis.loggedInUserInfo.user_id;
-            }
         }
         if (enginesis.gameId) {
             serverParams.game_id = enginesis.gameId;
@@ -995,7 +1015,7 @@
     /**
      * Convert a parameter object to a proper HTTP Form request.
      * @param parameterObject
-     * @returns {*}
+     * @returns {FormData}
      */
     function convertParamsToFormData (parameterObject) {
         var key;
@@ -1093,6 +1113,7 @@
     function qualifyAndSetServerStage (newServerStage) {
         var regMatch;
         var currentHost = enginesis.isBrowserBuild ? global.location.host : ""; // TODO: How to get host in NodeJS?
+        var isLocalhost = false;
         enginesis.serverHost = null;
 
         if (newServerStage === undefined || newServerStage === null) {
@@ -1112,6 +1133,7 @@
                 // match the stage matching current host
                 if (currentHost.substr(0, 9) == "localhost") {
                     newServerStage = "-l";
+                    isLocalhost = true;
                 } else {
                     regMatch = /-[ldqx]\./.exec(currentHost);
                     if (regMatch != null && regMatch.index > 0) {
@@ -1147,6 +1169,8 @@
                     + domainParts[numberOfParts - 2].replace(/-[ldqx]$/, "")
                     + enginesis.serverStage
                     + "." + domainParts[numberOfParts - 1];
+            } else if (isLocalhost) {
+                enginesis.serverHost = "enginesis-l.com";
             } else {
                 enginesis.serverHost = currentHost;
             }
@@ -1315,6 +1339,7 @@
             // TODO: we can use cr to validate the token was not changed
             userInfo = cookieGet(enginesis.SESSION_USERINFO);
             if ( ! isEmpty(userInfo)) {
+                debugLog("restoreUserFromAuthToken user info: " + userInfo);
                 userInfo = JSON.parse(userInfo);
                 if (userInfo != null) {
                     enginesis.authToken = authToken;
@@ -1340,6 +1365,7 @@
      */
     function clearUserSessionInfo() {
         removeObjectWithKey(enginesis.SESSION_USERINFO);
+        _clearRefreshToken();
         cookieSet(enginesis.SESSION_USERINFO, null, 0, "/", "", false);
         initializeLocalSessionInfo();
     }
@@ -1361,13 +1387,16 @@
             enginesis.sessionExpires = new Date(sessionInfo.session_expires);
             enginesis.authToken = sessionInfo.authtok;
             enginesis.authTokenExpires = new Date(sessionInfo.expires);
-            enginesis.refreshToken = sessionInfo.refreshToken;
+            enginesis.refreshToken = sessionInfo.refresh_token;
             enginesis.authTokenWasValidated = true;
             var hash = sessionMakeHash();
             var cr = enginesis.loggedInUserInfo.cr;
             // TODO: verify hashes agree?
+            // if (sessionInfo.cr != hash) {
+                // when hash does not agree what do we do? Log out user and clear session?
+            // }
             saveObjectWithKey(enginesis.SESSION_USERINFO, enginesis.loggedInUserInfo);
-            debugLog("enginesis.saveUserSessionInfo session id is " + enginesis.sessionId + " cr=" + cr + " hash=" + hash);
+            debugLog("enginesis.saveUserSessionInfo session id is " + enginesis.sessionId + " session.cr= " + sessionInfo.cr + "; loggedInUserInfo.cr=" + cr + "; sessionMakeHash=" + hash);
         } else {
             haveValidSession = false;
         }
@@ -1391,7 +1420,7 @@
 
     /**
      * When reloading the game we can see if a prior user login was in the cache so we can
-     * restore the session. If the session expires we can use a session refresh instead of 
+     * restore the session. If the session expires we can use a session refresh instead of
      * asking the user to log in again.
      * @returns {boolean} true if the save was successful, otherwise false.
      */
@@ -1504,7 +1533,7 @@
     }
 
     /**
-     * Save a refresh token in local storage. We use this token to refresh a login if we 
+     * Save a refresh token in local storage. We use this token to refresh a login if we
      * have a logged in user but the authentication token expired.
      * @param refreshToken
      */
@@ -1764,7 +1793,7 @@
         var base64={};
         var p="=";
         var tab="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    
+
         base64.encode=function(ba){
             var s=[], l=ba.length;
             var rm=l%3;
@@ -1796,7 +1825,7 @@
             }
             return s.join("");
         };
-    
+
         base64.decode=function(str){
             var s=str.split(""), out=[];
             var l=s.length;
@@ -1813,7 +1842,7 @@
             while(out[out.length-1]==0){ out.pop(); }
             return out;
         };
-    
+
         function arrayMapWithHoles(arr, callback, thisObject, Ctr){
             var i = 0, l = arr && arr.length || 0, out = new (Ctr || Array)(l);
             if(l && typeof arr == "string") arr = arr.split("");
@@ -1829,7 +1858,7 @@
             }
             return out;
         };
-    
+
         function stringTranslate(string, undesired, desired) {
             var i, char, found, length, result = "";
             if (typeof string !== "string" || string.length < 1 || ! Array.isArray(undesired) || ! Array.isArray(desired) || undesired.length != desired.length) {
@@ -1995,26 +2024,26 @@
                     0x90d4f869, 0xa65cdea0, 0x3f09252d, 0xc208e69f, 0xb74e6132, 0xce77e25b, 0x578fdfe3, 0x3ac372e6
                 ]
             }
-    
+
             function add(x,y){
                 return (((x>>0x10)+(y>>0x10)+(((x&0xffff)+(y&0xffff))>>0x10))<<0x10)|(((x&0xffff)+(y&0xffff))&0xffff);
             }
-    
+
             function xor(x,y){
                 return (((x>>0x10)^(y>>0x10))<<0x10)|(((x&0xffff)^(y&0xffff))&0xffff);
             }
-    
+
             function $(v, box){
                 var d=box.s3[v&0xff]; v>>=8;
                 var c=box.s2[v&0xff]; v>>=8;
                 var b=box.s1[v&0xff]; v>>=8;
                 var a=box.s0[v&0xff];
-        
+
                 var r = (((a>>0x10)+(b>>0x10)+(((a&0xffff)+(b&0xffff))>>0x10))<<0x10)|(((a&0xffff)+(b&0xffff))&0xffff);
                 r = (((r>>0x10)^(c>>0x10))<<0x10)|(((r&0xffff)^(c&0xffff))&0xffff);
                 return (((r>>0x10)+(d>>0x10)+(((r&0xffff)+(d&0xffff))>>0x10))<<0x10)|(((r&0xffff)+(d&0xffff))&0xffff);
             }
-    
+
             function eb(o, box){
                 var l=o.left;
                 var r=o.right;
@@ -2038,7 +2067,7 @@
                 o.right=l;
                 o.left=xor(r,box.p[17]);
             }
-    
+
             function db(o, box){
                 var l=o.left;
                 var r=o.right;
@@ -2062,7 +2091,7 @@
                 o.right=l;
                 o.left=xor(r,box.p[0]);
             }
-    
+
             function init(key){
                 var k=key, pos=0, data=0, res={ left:0, right:0 }, i, j, l;
                 var box = {
@@ -2088,7 +2117,7 @@
                 }
                 return box;
             }
-    
+
             this.hexStringToByteArray=function(hexString) {
                 if (hexString.length % 2 == 1) {
                     hexString += "0";
@@ -2098,18 +2127,18 @@
                 }
                 return bytes;
             }
-        
+
             this.getIV=function(){
                 return base64.encode(iv);
             };
-    
+
             this.setIV=function(data){
                 var ba=base64.decode(data);
                 iv={};
                 iv.left=ba[0]*POW24|ba[1]*POW16|ba[2]*POW8|ba[3];
                 iv.right=ba[4]*POW24|ba[5]*POW16|ba[6]*POW8|ba[7];
             };
-    
+
             this.encryptString = function(plaintext, key){
                 var bx = init(this.hexStringToByteArray(key)), padding = 8-(plaintext.length&7);
                 for (var i=0; i<padding; i++){ plaintext+=String.fromCharCode(padding); }
@@ -2136,7 +2165,7 @@
                 }
                 return stringTranslate(base64.encode(cipher), ["+", "/", "="], ["-", "_", "~"]);
             };
-    
+
             this.decryptString = function(ciphertext, key){
                 var bx = init(this.hexStringToByteArray(key));
                 var pt=[];
@@ -2280,7 +2309,7 @@
 
     /**
      * Return the error code of a response.
-     * @param {object} enginesisResult 
+     * @param {object} enginesisResult
      * @returns {string} An Enginesis error code.
      */
     enginesis.error = function(enginesisResult) {
@@ -2291,7 +2320,7 @@
      * Generate an enginesis error that looks the same as an error response from the server.
      * This may be helpful to applications with error event handling to consolodate the code
      * so it looks the same as real error responses.
-     * 
+     *
      * @param {string} serviceName The official Enginesis service endpoint that was invoked.
      * @param {int} stateSeq Session serial number.
      * @param {string} errorCode An Enginesis error code.
@@ -2346,8 +2375,8 @@
     };
 
     /**
-     * Return an object of user information. If no user is logged in a valid object is still returned 
-     * but with invalid user info. Note we do not hand out `loggedInUserInfo` because there are 
+     * Return an object of user information. If no user is logged in a valid object is still returned
+     * but with invalid user info. Note we do not hand out `loggedInUserInfo` because there are
      * certain properties we do not want clients to access or change.
      * @returns {object}
      */
@@ -2366,12 +2395,22 @@
     };
 
     /**
+     * Save the user log in refresh token when it is brought in from a server-side
+     * log in process and we need to save it client-side.
+     */
+    enginesis.saveRefreshToken = function (refreshToken) {
+        _saveRefreshToken(refreshToken);
+    }
+
+    /**
      * Return true if the current device is a touch device.
      * @returns {boolean}
      */
     enginesis.isTouchDevice = function () {
         return enginesis.isTouchDeviceFlag;
     };
+
+    enginesis.queryStringToObject = queryStringToObject;
 
     /**
      * Determine if the user name is a valid format that would be accepted by the server.
@@ -2453,7 +2492,7 @@
      * Each site registers a set of resources apps may need to do certain things that are site-specific.
      * These host names are also configured to the current stage and protocol. This set of URLs/resources
      * is configured on the server for each site and the server should be queried the first time to get
-     * them. They rarely change so caching should be fine. This function returns 
+     * them. They rarely change so caching should be fine. This function returns
      * an object populated with the following urls:
      *  .root = the root of the website
      *  .profile = the page that holds the user's profile page when they are logged in
@@ -2480,7 +2519,7 @@
                 profile: urlBase + siteResources.profileURL,
                 register: urlBase + siteResources.registerURL,
                 terms: urlBase + siteResources.termsURL
-            };    
+            };
         } else {
             // TODO: if SessionBegin was not called we won't have this information. We need an alternative in this scenario. Maybe force a call to SessionBegin?
             // TODO: using varyn.com as the default makes no sense here.
@@ -2788,7 +2827,7 @@
         var service = "GameDataCreate";
         if (( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) && (isEmpty(fromAddress) || isEmpty(fromName))) {
             // if not logged in, fromAddress, fromName must be provided. Otherwise we get it on the server from the logged in user info.
-            errorCode = "INVALID_PARAM";
+            errorCode = "INVALID_PARAMETER";
         } else if (isEmpty(enginesis.gameId)) {
             errorCode = "INVALID_GAME_ID";
         }
@@ -2932,8 +2971,8 @@
         return sendRequest("GameListListGamesByName", {game_list_name: gameListName}, overRideCallBackFunction);
     };
 
-    enginesis.gameListByMostPopular = function (startDate, endDate, firstItem, numItems, overRideCallBackFunction) {
-        return sendRequest("GameListByMostPopular", {start_date: startDate, end_date: endDate, first_item: firstItem, num_items: numItems}, overRideCallBackFunction);
+    enginesis.gameListByMostPopular = function (startDate, endDate, startItem, numItems, overRideCallBackFunction) {
+        return sendRequest("GameListByMostPopular", {start_date: startDate, end_date: endDate, start_item: startItem, num_items: numItems}, overRideCallBackFunction);
     };
 
     /**
@@ -2984,7 +3023,7 @@
     /**
      * Submit a final game score to the server. This requires a logged in user and a prior
      * call to SessionBegin to establish a game session with the server.
-     * @param {int|null} gameId if 0/null provided we use the gameId set on the Enginesis object. A 
+     * @param {int|null} gameId if 0/null provided we use the gameId set on the Enginesis object. A
      *    game id is mandatory for sumitting a score.
      * @param {int} score a value within the range established for the game.
      * @param {string} gameData option data regarding the game play. This is data specific to the
@@ -3020,7 +3059,7 @@
         if (errorCode == "") {
             submitString = encryptScoreSubmit(enginesis.siteId, enginesis.loggedInUserInfo.user_id, gameId, score, gameData, timePlayed, sessionId);
             if (submitString == null) {
-                errorCode = "INVALID_PARAM";
+                errorCode = "INVALID_PARAMETER";
             }
         }
         if (errorCode == "") {
@@ -3228,10 +3267,10 @@
         return sendRequest("RegisteredUserGet", {get_user_id: userId, site_user_id: siteUserId, network_id: networkId}, overRideCallBackFunction);
     };
 
-    enginesis.siteListGames = function(firstItem, numItems, gameStatusId, overRideCallBackFunction) {
+    enginesis.siteListGames = function(startItem, numItems, gameStatusId, overRideCallBackFunction) {
         // return a list of all assets assigned to the site in title order
-        if (firstItem == null || firstItem < 0) {
-            firstItem = 1;
+        if (startItem == null || startItem < 0) {
+            startItem = 1;
         }
         if (numItems == null || numItems > 500) {
             numItems = 500;
@@ -3239,7 +3278,7 @@
         if (gameStatusId == null || gameStatusId > 3) {
             gameStatusId = 2;
         }
-        return sendRequest("SiteListGames", {first_item: firstItem, num_items: numItems, game_status_id: gameStatusId}, overRideCallBackFunction);
+        return sendRequest("SiteListGames", {start_item: startItem, num_items: numItems, game_status_id: gameStatusId}, overRideCallBackFunction);
     };
 
     enginesis.siteListGamesRandom = function(numItems, overRideCallBackFunction) {
@@ -3293,46 +3332,45 @@
      * @param overRideCallBackFunction {function} called when server replies.
      */
     enginesis.userLoginCoreg = function (registrationParameters, networkId, overRideCallBackFunction) {
-        if (typeof registrationParameters.siteUserId === 'undefined' || registrationParameters.siteUserId.length == 0) {
+        if (typeof registrationParameters.siteUserId === "undefined" || registrationParameters.siteUserId.length == 0) {
             return false;
         }
-        if ((typeof registrationParameters.userName === 'undefined' || registrationParameters.userName.length == 0) && (typeof registrationParameters.realName === 'undefined' || registrationParameters.realName.length == 0)) {
+        if ((typeof registrationParameters.userName === "undefined" || registrationParameters.userName.length == 0) && (typeof registrationParameters.realName === "undefined" || registrationParameters.realName.length == 0)) {
             return false; // Must provide either userName, realName, or both
         }
-        if (typeof registrationParameters.userName === 'undefined') {
-            registrationParameters.userName = '';
+        if (typeof registrationParameters.userName === "undefined") {
+            registrationParameters.userName = "";
         }
-        if (typeof registrationParameters.realName === 'undefined') {
-            registrationParameters.realName = '';
+        if (typeof registrationParameters.realName === "undefined") {
+            registrationParameters.realName = "";
         }
-        if (typeof registrationParameters.gender === 'undefined' || registrationParameters.gender.length == 0) {
-            registrationParameters.gender = 'U';
-        } else if (registrationParameters.gender != 'M' && registrationParameters.gender != 'F' && registrationParameters.gender != 'U') {
-            registrationParameters.gender = 'U';
+        if (typeof registrationParameters.gender === "undefined" || registrationParameters.gender.length == 0) {
+            registrationParameters.gender = "U";
+        } else if (registrationParameters.gender != "M" && registrationParameters.gender != "F" && registrationParameters.gender != "U") {
+            registrationParameters.gender = "U";
         }
-        if (typeof registrationParameters.emailAddress === 'undefined') {
-            registrationParameters.emailAddress = '';
+        if (typeof registrationParameters.emailAddress === "undefined") {
+            registrationParameters.emailAddress = "";
         }
-        if (typeof registrationParameters.scope === 'undefined') {
-            registrationParameters.scope = '';
+        if (typeof registrationParameters.scope === "undefined") {
+            registrationParameters.scope = "";
         }
-        if (typeof registrationParameters.agreement === 'undefined') {
-            registrationParameters.agreement = '0';
+        if (typeof registrationParameters.agreement === "undefined") {
+            registrationParameters.agreement = "0";
         }
-        if (typeof registrationParameters.idToken === 'undefined') {
-            registrationParameters.idToken = '';
+        if (typeof registrationParameters.idToken === "undefined") {
+            registrationParameters.idToken = "";
         }
-        if (typeof registrationParameters.avatarURL === 'undefined') {
-            registrationParameters.avatarURL = '';
+        if (typeof registrationParameters.avatarURL === "undefined") {
+            registrationParameters.avatarURL = "";
         }
-        if (typeof registrationParameters.dob === 'undefined' || registrationParameters.dob.length == 0) {
+        if (typeof registrationParameters.dob === "undefined" || registrationParameters.dob.length == 0) {
             registrationParameters.dob = new Date();
             registrationParameters.dob = registrationParameters.dob.toISOString().slice(0, 9);
         } else if (registrationParameters.dob instanceof Date) {
             // if is date() then convert to string
             registrationParameters.dob = registrationParameters.dob.toISOString().slice(0, 9);
         }
-
         return sendRequest("UserLoginCoreg", {
             site_user_id: registrationParameters.siteUserId,
             user_name: registrationParameters.userName,

@@ -2,11 +2,11 @@
 /**
  * Enginesis service object for PHP clients. Support for each Enginesis API and additional helper functions.
  * @author: varyn
- * @date: 2/13/16
+ * @date: 13-Feb-2016
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.4.72');
+    define('ENGINESIS_VERSION', '2.6.2');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -42,10 +42,10 @@ abstract class EnginesisRefreshStatus {
     const missing = 9;    // no token to validate, or possibly an invalid token.
 }
 
-class Enginesis
-{
+class Enginesis {
     private $m_server;
-    private $m_serviceRoot;
+    private $m_serviceHost;
+    private $m_serviceProtocol;
     private $m_serviceEndPoint;
     private $m_avatarEndPoint;
     private $m_lastError;
@@ -60,7 +60,6 @@ class Enginesis
     private $m_userAccessLevel;
     private $m_stage;
     private $m_syncId;
-    private $m_serviceProtocol;
     private $m_responseFormat;
     private $m_debug;
     private $m_debugFunction;
@@ -80,12 +79,14 @@ class Enginesis
 
     /**
      * Set up the Enginesis environment so it is able to easily make service requests with the server.
-     * @method constructor
-     * @param int $siteId Site id to represent.
-     * @param string $enginesisServer which Enginesis server you want to connect with. Leave empty to match current stage.
-     * @param string $developerKey Your developer key.
+     *
+     * @param int $siteId Your assigned site id.
+     * @param string $enginesisServer which Enginesis server you want to connect with. Leave empty or '*' to match current stage.
+     * @param string $developerKey Your developer key. Must be set before any API calls can be made, but can be set later with setDeveloperKey().
+     * @param string $debugFunction A function to call for debug logging, defaults to NULL. What is the signature of this function?
      */
-    public function __construct ($siteId, $enginesisServer, $developerKey) {
+    public function __construct ($siteId, $enginesisServer, $developerKey, $debugFunction = null) {
+        // TODO: Should initialize to false and only set when requested.
         $this->m_debug = true;
         $this->m_server = $this->serverName();
         $this->m_stage = $this->serverStage($this->m_server);
@@ -101,7 +102,6 @@ class Enginesis
         $this->m_syncId = 0;
         $this->m_gameId = 0;
         $this->m_gameGroupId = 0;
-        $this->m_serviceProtocol = $this->getServiceProtocol();
         $this->m_responseFormat = 'json';
         $this->m_debugFunction = null;
         $this->m_developerKey = $developerKey;
@@ -111,9 +111,13 @@ class Enginesis
         $this->m_refreshToken = null;
         $this->m_tokenStatus = EnginesisRefreshStatus::missing;
         $this->setServerPaths();
-        $this->setServiceRoot($enginesisServer);
-        $this->m_serviceEndPoint = $this->m_serviceRoot . 'index.php';
-        $this->m_avatarEndPoint = $this->m_serviceRoot . 'avatar/';
+        $this->setServiceHost($enginesisServer);
+        $serviceRoot = $this->m_serviceProtocol . '://' . $this->m_serviceHost;
+        $this->m_serviceEndPoint = $serviceRoot . '/index.php';
+        $this->m_avatarEndPoint = $serviceRoot . '/avatar/';
+        if ($debugFunction != null) {
+            $this->setDebugFunction($debugFunction);
+        }
         $this->restoreUserFromAuthToken(null);
     }
 
@@ -182,6 +186,27 @@ class Enginesis
     }
 
     /**
+     * Enginesis boolean values are 1 for true or 0 for false. Coerce any
+     * boolean-like value to either 1 or 0. Accepted values for true are
+     * 1, Y, Yes, T, True, Checked, a number that evaluates to non-zero,
+     * or any non-null value. Anything else is considered false.
+     *
+     * @param any $variable Any type will be coerced to a boolean value.
+     * @return integer Either 1 or 0.
+     */
+    function valueToBoolean($variable) {
+        if (is_string($variable)) {
+            $variable = strtoupper($variable);
+            $result =  $variable == '1' || $variable == 'Y' || $variable == 'T' || $variable == 'YES' || $variable == 'TRUE' || $variable == 'CHECKED';
+        } elseif (is_numeric($variable)) {
+            $result = ! ! $variable;
+        } else {
+            $result = $variable != null;
+        }
+        return $result ? 1 : 0;
+    }
+
+    /**
      * Determine if the $id is valid.
      * @param $id
      * @return bool
@@ -192,40 +217,47 @@ class Enginesis
 
     /**
      * Determine if the string is valid.
-     * @param $string string to test
-     * @param $minLength int The minimum length allowed. 0 will allow both null and empty string.
-     * @param $maxLength int The maximum length allowed.
-     * @param $allowEmpty bool true then allow empty/non-existing string.
-     * @param $allowTags bool true then make sure string does not contain HTML.
-     * @return bool
+     *
+     * @param string $string String to test, if not a string you should coerce it first.
+     * @param integer $minLength The minimum length allowed. 0 will allow both null and empty string.
+     * @param integer $maxLength The maximum length allowed.
+     * @param boolean $allowEmpty If true then allow empty/non-existing string.
+     * @param blloean $allowTags If true then make sure string does not contain HTML tags.
+     * @return boolean
      */
-    public function isValidString ($string, $minLength, $maxLength, $allowEmpty, $allowTags) {
-        if ($allowEmpty && strlen($string) == 0) {
-            return true;
+    public function isValidString ($string, $minLength, $maxLength, $allowEmpty = false, $allowTags = true) {
+        if ( ! is_string($string)) {
+            return false;
         } else {
-            if ( ! $allowTags && $string != strip_tags($string)) {
-                return false;
+            $length = strlen($string);
+            if ($allowEmpty && $length == 0) {
+                return true;
             } else {
-                $len = strlen($string);
-                return  $len >= $minLength && $len <= $maxLength;
+                if ( ! $allowTags && $length != strlen(strip_tags($string))) {
+                    return false;
+                } else {
+                    return $length >= $minLength && $length <= $maxLength;
+                }
             }
         }
     }
 
     /**
      * Determine if a user name passes basic validity checks.
-     * @param $userName
-     * @return bool
+     *
+     * @param string $userName
+     * @return boolean
      */
     public function isValidUserName ($userName) {
-        $badNames = array('null', 'undefined', 'xxx', 'shit', 'fuck', 'dick');
+        $badNames = ['null', 'undefined', 'xxx', 'shit', 'fuck', 'dick'];
         return strlen(trim($userName)) > 2 && ! in_array($userName, $badNames);
     }
 
     /**
      * Determine if a password passes basic validity checks.
+     *
      * @param $password
-     * @return bool
+     * @return boolean
      */
     public function isValidPassword ($password) {
         return strlen(trim($password)) > 3;
@@ -233,22 +265,34 @@ class Enginesis
 
     /**
      * Determine if we have a valid gender setting.
-     * @param $gender
-     * @return bool
+     *
+     * @param string $gender
+     * @return boolean
      */
     public function isValidGender ($gender) {
-        $acceptableGenders = array('M', 'Male', 'F', 'Female', 'U', 'Undefined');
+        $acceptableGenders = ['M', 'Male', 'F', 'Female', 'U', 'Undefined'];
         return in_array($gender, $acceptableGenders);
     }
 
     /**
      * Determine if the date is acceptable.
+     *
      * @param $date
      * @return bool
      */
     public function isValidDate ($date) {
         $dateParts = explode('-', $date);
         return count($dateParts) == 3 && checkdate($dateParts[1], $dateParts[2], $dateParts[0]);
+    }
+
+    /**
+     * Determine if an email address appears to be valid.
+     *
+     * @param string $email An email address to check.
+     * @return boolean True if we think the email address looks valid, otherwise false.
+     */
+    function isValidEmailAddress ($email) {
+        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
     }
 
     /**
@@ -260,7 +304,7 @@ class Enginesis
      */
     public function mySQLDate($date = null) {
         $mysqlFormat = 'Y-m-d H:i:s';
-        if ($date == null) {
+        if ($date === null) {
             $dateStr = null;
         } elseif (is_object($date)) {
             $dateStr = $date->format($mysqlFormat);
@@ -370,6 +414,7 @@ class Enginesis
      */
     public function getLoggedInUserInfo() {
         if ($this->m_refreshedUserInfo != null) {
+            $this->debugInfo("already have m_refreshedUserInfo " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
             return $this->m_refreshedUserInfo;
         } else {
             return $this->sessionUserInfoGet();
@@ -395,21 +440,23 @@ class Enginesis
     }
 
     /**
-     * Return the server name of the instance we are running on. This should return a host domain, not a URL. For example, www.varyn.com.
+     * Return the server name of the instance we are running on. This should return a
+     * host domain, not a URL. For example, www.varyn.com.
+     *
      * @return string Server name.
      */
     public function getServerName() {
-        return empty($this->m_server) ? serverName() : $this->m_server;
+        return empty($this->m_server) ? $this->serverName() : $this->m_server;
     }
 
     /**
-     * Return the Enginesis service root to the Enginesis server this instance is communicating with. This is expected to be a
-     * complete URL to the root of the Enginesis services endpoint, for example https://enginesis.varyn-d.com when the
-     * current instance is https://www.varyn-d.com.
-     * @return string Root Enginesis services URL.
+     * Return the Enginesis service host domain to the Enginesis server this instance is communicating with.
+     * This is expected to be the host domain of the Enginesis services endpoint. For example <enginesis class="varyn-d com"></enginesis>when the
+
+     * @return string Enginesis services host domain.
      */
-    public function getServiceRoot() {
-        return $this->m_serviceRoot;
+    public function getServiceHost() {
+        return $this->m_serviceHost;
     }
 
     /**
@@ -449,7 +496,7 @@ class Enginesis
      */
     public function domainForTargetPlatform($targetPlatform, $hostName = null) {
         if (empty($hostName)) {
-            $hostName = serverName();
+            $hostName = $this->getServerName();
         }
         // find the tld
         $lastDot = strrpos($hostName, '.');
@@ -473,7 +520,7 @@ class Enginesis
         // assume live until we prove otherwise
         $targetPlatform = '';
         if (strlen($hostName) == 0) {
-            $hostName = $this->serverName();
+            $hostName = $this->getServerName();
         }
         if (preg_match('/-[dlqx]\./i', $hostName, $matchedStage)) {
             $targetPlatform = substr($matchedStage[0], 0, 2);
@@ -491,12 +538,21 @@ class Enginesis
     }
 
     /**
-     * Return the server stage this instance is running on (-l, -d, -q, '' for live.)
+     * Return the server stage this instance is running on (-l, -d, -q, -x, '' for live.)
      * This is determined at object construction.
      * @return string
      */
     public function getServerStage() {
         return $this->m_stage;
+    }
+
+    /**
+     * Return the root URL of the service: http protocol, hot name, and root / of the website.
+     *
+     * @return string The root URL of the service, such as "https://enginesis.com/"
+     */
+    public function getServiceRoot() {
+        return $this->m_serviceProtocol . '://' . $this->m_serviceHost . '/';
     }
 
     /**
@@ -520,30 +576,46 @@ class Enginesis
      * of figuring out the matching domain to the hosting website and the matching stage. For example, if
      * this is running on https://www.varyn.com and the stage is -q, then the expected Enginesis service is
      * running at https://enginesis.varyn-q.com/.
-     * 
+     *
      * @param string|null $enginesisServer The intended stage, a full domain, or empty.
-     *     - if empty, match the current domain: www.varyn-q.com becomes enginesis.varyn-q.com. This should be the most common usage.
+     *     - if empty or "*", match the current domain: www.varyn-q.com becomes enginesis.varyn-q.com. This should be the most common usage.
      *     - a stage designation, match to current domain but on that stage: specifying -q while currently on www.vary.com becomes enginesis.varyn-q.com.
      *     - anything else forces the service endpoint to exactly that specification.
      */
-    public function setServiceRoot($enginesisServer = null) {
-        $enginesisService = 'enginesis.';
-        $baseURL = $this->m_serviceProtocol . '://' . $enginesisService;
-        if ($enginesisServer === null) {
+    public function setServiceHost($enginesisServer = null) {
+        $defaultEnginesisService = 'enginesis';
+        $protocol = $this->getServiceProtocol();
+        $enginesisServiceHost = '';
+        if ($enginesisServer === null || $enginesisServer === '*') {
             // Caller doesn't know which stage, converse with the one that matches the stage we are on
-            $enginesisServiceRoot = $baseURL . $this->serverTail();
+            $currentHost = $this->getServerName();
+            // drop the host service, if one exists, so we can replace it with 'enginesis'.
+            if ($this->m_siteId !== 100) {
+                $enginesisServiceHost .= $defaultEnginesisService . '.';
+            }
+            $enginesisServiceHost .= $this->serverTail($currentHost);
         } elseif ($this->isValidStage($enginesisServer)) {
             // Caller may provide a stage we should converse with, e.g. -l
-            $enginesisServiceRoot = $baseURL . $this->serverTail($this->domainForTargetPlatform($enginesisServer));
+            if ($this->m_siteId !== 100) {
+                $enginesisServiceHost .= $defaultEnginesisService . '.';
+            }
+            $enginesisServiceHost .= $this->serverTail($this->domainForTargetPlatform($enginesisServer));
         } else {
             // Caller can provide a specific server we should converse with
-            $enginesisServiceRoot = $enginesisServer;
+            $URLParts = parse_url($enginesisServer);
+            if (isset($URLParts['path']) && ! isset($URLParts['host'])) {
+                // if we only got path then assume it is a host domain
+                $URLParts['host'] = $URLParts['path'];
+                unset($URLParts['path']);
+            }
+            if (isset($URLParts[scheme])) {
+                $protocol = $URLParts[scheme];
+            }
+            $enginesisServiceHost = $URLParts['host'];
         }
-        if (substr($enginesisServiceRoot, -1) != '/') {
-            $enginesisServiceRoot .= '/';
-        }
-        $this->m_serviceRoot = $enginesisServiceRoot;
-        return $this->m_serviceRoot;
+        $this->m_serviceHost = $enginesisServiceHost;
+        $this->m_serviceProtocol = $protocol;
+        return $this->m_serviceHost;
     }
 
     public function setDeveloperKey($developerKey) {
@@ -574,7 +646,7 @@ class Enginesis
      * @return object Returns a successful error code.
      */
     private static function noError () {
-        return array('success' => '1', 'message' => '', 'extended_info' => '');
+        return ['success' => '1', 'message' => '', 'extended_info' => ''];
     }
 
     /**
@@ -590,8 +662,8 @@ class Enginesis
             $statusMessage = '';
             $extendedInfo = '';
             $results = $this->getResponseStatus($enginesisResponse, $success, $statusMessage, $extendedInfo);
-            if ($results == null) {
-                $this->m_lastError = array('success' => $success, 'message' => $statusMessage, 'extended_info' => $extendedInfo);
+            if ($results === null) {
+                $this->m_lastError = ['success' => $success, 'message' => $statusMessage, 'extended_info' => $extendedInfo];
             } else {
                 $this->m_lastError = Enginesis::noError();
             }
@@ -610,7 +682,7 @@ class Enginesis
         if ($success) {
             $this->m_lastError = Enginesis::noError();
         } else {
-            $this->m_lastError = array('success' => $success, 'message' => $errorCode, 'extended_info' => $errorMessage);
+            $this->m_lastError = ['success' => $success, 'message' => $errorCode, 'extended_info' => $errorMessage];
         }
         return $this->m_lastError;
     }
@@ -656,7 +728,14 @@ class Enginesis
             $refreshToken = getPostOrRequestVar('refreshToken', '');
             if (empty($refreshToken)) {
                 if (isset($_COOKIE[REFRESH_COOKIE])) {
-                    $refreshToken = $_COOKIE[REFRESH_COOKIE];
+                    $refreshTokenJSON = json_decode($_COOKIE[REFRESH_COOKIE]);
+                    if ($refreshTokenJSON != null) {
+                        $refreshToken = $refreshTokenJSON->refresh_token;
+                        $timestamp = $refreshTokenJSON->timestamp;
+                    } else {
+                        $refreshToken = null;
+                        // TODO: the saved token isn't valid, some type of logging and recovery here?
+                    }
                 } else {
                     $refreshToken = null;
                 }
@@ -668,14 +747,19 @@ class Enginesis
     }
 
     /**
-     * Allow the user to save the refresh token with this session. Then we can use it if we detect an
+     * Save the user's refresh token with this session. Then we can use it if we detect an
      * expired authentication token.
-     * @param $refreshToken
+     *
+     * @param string $refreshToken
      * @return string
      */
     public function saveRefreshToken($refreshToken) {
         $this->m_refreshToken = $refreshToken;
-        setcookie(REFRESH_COOKIE, $refreshToken, time() + (365 * 24 * 60 * 60), '/', $this->sessionCookieDomain());
+        $timestamp = time();
+        // PHP timestamps are in seconds, JavaScript timestamps are in milliseconds. :(
+        $timestampJS = $timestamp * 1000;
+        $refreshTokenJSON = '{"refreshToken":"'. $refreshToken . '","timestamp":"' . $timestampJS . '"}';
+        setcookie(REFRESH_COOKIE, $refreshTokenJSON, $timestamp + (365 * 24 * 60 * 60), '/', $this->sessionCookieDomain());
         return $this->m_refreshToken;
     }
 
@@ -684,7 +768,7 @@ class Enginesis
      * TODO: This code is actually WRONG! We cannot do this on the (PHP) client. Instead, we should
      * send a SessionBegin request to the Enginesis server and it will tell us this authtoken is
      * acceptable or not.
-     * @param null $authToken
+     * @param string|null $authToken
      * @return EnginesisRefreshStatus a status code indicating the token situation
      */
     private function restoreUserFromAuthToken ($authToken = null) {
@@ -712,18 +796,20 @@ class Enginesis
                 $this->m_authTokenWasValidated = true;
                 $this->m_isLoggedIn = true;
                 $this->m_refreshedUserInfo = $this->sessionUserInfoGet();
+                $this->debugInfo("Restored m_refreshedUserInfo from sessionUserInfoGet " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
                 $status = EnginesisRefreshStatus::valid;
             } elseif ($errorCode == EnginesisErrors::TOKEN_EXPIRED) {
                 // if the auth token is expired we need to ask the server for a new one IF we have the refresh token
                 $refreshToken = $this->sessionGetRefreshToken();
                 if ( ! empty($refreshToken)) {
                     $userInfo = $this->sessionRefresh($refreshToken);
-                    if ($userInfo == null) {
+                    if ($userInfo === null) {
                         $errorCode = $this->m_lastError['message'];
                         $status = EnginesisRefreshStatus::expired;
                     } else {
                         $status = EnginesisRefreshStatus::refreshed;
                         $this->m_refreshedUserInfo = $userInfo;
+                        $this->debugInfo("Restored expired m_refreshedUserInfo from sessionRefresh " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
                     }
                 } else {
                     $status = EnginesisRefreshStatus::missing;
@@ -735,12 +821,13 @@ class Enginesis
             $refreshToken = $this->sessionGetRefreshToken();
             if ( ! empty($refreshToken)) {
                 $userInfo = $this->sessionRefresh($refreshToken);
-                if ($userInfo == null) {
+                if ($userInfo === null) {
                     $errorCode = $this->m_lastError['message'];
                     $status = EnginesisRefreshStatus::invalid;
                 } else {
                     $status = EnginesisRefreshStatus::refreshed;
                     $this->m_refreshedUserInfo = $userInfo;
+                    $this->debugInfo("Restored missing m_refreshedUserInfo from sessionRefresh " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
                 }
             }
         }
@@ -748,6 +835,7 @@ class Enginesis
         if ( ! $this->m_authTokenWasValidated) {
             $this->sessionClear();
         }
+        $this->debugInfo("restoreUserFromAuthToken m_refreshedUserInfo done " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
         return $status;
     }
 
@@ -765,13 +853,13 @@ class Enginesis
         if ($this->m_authTokenWasValidated) {
             return $this->m_authToken;
         }
-        if ($userId == null || $userId < 1) {
+        if ($userId === null || $userId < 1) {
             $userId = $this->m_userId;
         }
-        if ($siteUserId == null || $siteUserId == '') {
+        if ($siteUserId === null || $siteUserId == '') {
             $siteUserId = $this->m_siteUserId;
         }
-        if ($userName == null || $userName == '') {
+        if ($userName === null || $userName == '') {
             $userName = $this->m_userName;
         }
         $decryptedData = 'siteid=' . $siteId . '&userid=' . $userId . '&siteuserid=' . $siteUserId . '&networkid=' . $networkId . '&username=' . $userName . '&accesslevel=' . $accessLevel . '&daystamp=' . $this->sessionDayStamp();
@@ -781,7 +869,7 @@ class Enginesis
     /**
      * Decrypt an authentication token and return an array of items contained in it. This function is designed to undo
      * what authTokenMake did but returning an array of the input parameters.
-     * @param $authenticationToken {string} the encrypted token.
+     * @param string $authenticationToken the encrypted token.
      * @return array|null Returns null if the token could not be decrypted, when successful returns an array matching the
      *     input parameters of authTokenMake.
      */
@@ -866,11 +954,11 @@ class Enginesis
     /**
      * Save the authenticated session to cookie so we can retrieve it next time this user returns.
      * @param $authenticationToken string the encrypted authentication token generated by sessionMakeAuthenticationTokenEncrypted.
-     * @param $user_id
-     * @param $user_name
-     * @param $site_user_id
-     * @param $access_level
-     * @param $network_id
+     * @param integer $user_id associated with $authenticationToken.
+     * @param string $user_name associated with $authenticationToken.
+     * @param string $site_user_id associated with $authenticationToken.
+     * @param integer $access_level associated with $authenticationToken.
+     * @param integer $network_id associated with $authenticationToken.
      * @return string An error code, '' if successful.
      */
     private function sessionSave ($authenticationToken, $user_id, $user_name, $site_user_id, $access_level, $network_id) {
@@ -881,12 +969,12 @@ class Enginesis
             if ( ! setcookie(SESSION_COOKIE, $authenticationToken, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $this->sessionCookieDomain())) {
                 $rc = 'CANNOT_SET_SESSION';
                 $this->setLastError($rc, 'sessionSave setcookie failed');
-                $this->debugInfo("Failed to save the engsession cookie");
+                $this->debugInfo("Failed to save the engsession cookie", __FILE__, __LINE__);
             }
         } catch (Exception $e) {
             $rc = 'CANNOT_SET_SESSION';
             $this->setLastError($rc, 'sessionSave could not set cookie: ' . $e->getMessage());
-            $this->debugInfo("Exception when saving the engsession cookie");
+            $this->debugInfo("Exception when saving the engsession cookie", __FILE__, __LINE__);
         }
         error_reporting($errorLevel); // put error level back to where it was
         if ($rc == '') {
@@ -922,6 +1010,9 @@ class Enginesis
                 $rc = 'CANNOT_SAVE_USERINFO';
                 $this->setLastError($rc, 'sessionUserInfoSave setcookie failed');
             }
+            if (isset($userInfo->refresh_token)) {
+                $this->saveRefreshToken($userInfo->refresh_token);
+            }
         } catch (Exception $e) {
             $rc = 'CANNOT_SAVE_USERINFO';
             $this->setLastError($rc, 'sessionUserInfoSave could not set cookie: ' . $e->getMessage());
@@ -932,18 +1023,23 @@ class Enginesis
     }
 
     /**
-     * Restore the user info data from cookie
+     * Restore the user info data from cookie.
+     *
      * @return null|object
      */
-    public function sessionUserInfoGet () {
+    public function sessionUserInfoGet() {
         $userInfo = null;
         if (isset($_COOKIE[SESSION_USERINFO])) {
             try {
                 $userInfo = json_decode($_COOKIE[SESSION_USERINFO]);
                 // TODO: Validate this user data make sure it was not tampered, check if expired.
+                $this->debugInfo("decoded cookie for SESSION_USERINFO " . json_encode($userInfo), __FILE__, __LINE__);
             } catch (Exception $e) {
                 $this->setLastError('CANNOT_GET_USERINFO', 'sessionUserInfoGet could not get cookie: ' . $e->getMessage());
+                $this->debugInfo('sessionUserInfoGet fails: ' . json_decode($this->m_lastError), __FILE__, __LINE__);
             }
+        } else {
+            $this->debugInfo("no cookie for SESSION_USERINFO, not sure if you were expecting one", __FILE__, __LINE__);
         }
         return $userInfo;
     }
@@ -956,13 +1052,26 @@ class Enginesis
      */
     private function sessionRestoreFromResponse($serverResponse) {
         $userInfo = $serverResponse->row;
-        if ($userInfo) {
-            $this->sessionSave($userInfo->authtok, $userInfo->user_id, $userInfo->user_name, $userInfo->site_user_id, $userInfo->access_level, EnginesisNetworks::Enginesis);
-            $this->sessionUserInfoSave($userInfo);
-            if (isset($userInfo->refreshToken)) {
-                $this->saveRefreshToken($userInfo->refreshToken);
+        if ($userInfo && isset($userInfo->authtok)) {
+            if (! isset($userInfo->user_id)) {
+                $userData = $this->authTokenDecrypt($userInfo->authtok);
+                if ($userData !== null) {
+                    $userInfo->site_id = $userData['siteid'];
+                    $userInfo->user_id = $userData['userid'];
+                    $userInfo->user_name = $userData['username'];
+                    $userInfo->site_user_id = $userData['siteuserid'];
+                    $userInfo->access_level = $userData['accesslevel'];
+                    $userInfo->network_id = $userData['networkid'];
+                }
             }
+            $this->sessionSave($userInfo->authtok, $userInfo->user_id, $userInfo->user_name, $userInfo->site_user_id, $userInfo->access_level, $userInfo->network_id);
+            $this->sessionUserInfoSave($userInfo);
             $this->m_refreshedUserInfo = $userInfo;
+            $this->debugInfo("Restored m_refreshedUserInfo from sessionRestoreFromResponse " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
+        } else {
+            $this->debugInfo("BAD UserInfo from sessionRestoreFromResponse " . json_encode($serverResponse), __FILE__, __LINE__);
+            echo("BAD UserInfo from sessionRestoreFromResponse " . json_encode($serverResponse));
+            $userInfo = null;
         }
         return $userInfo;
     }
@@ -1077,7 +1186,7 @@ class Enginesis
      * to consolidate and handle logging. There is no default for this, so if this function is not set then
      * this Enginesis SDK will not perform any logging even if it is turned on.
      * The function signature is `function debugCallback($message)`.
-     * 
+     *
      * @param function $debugFunction A function reference.
      * @return function|null The prior function that was set is returned.
      */
@@ -1088,22 +1197,36 @@ class Enginesis
     }
 
     /**
+     * Turn debugging on or off. Debugging is logged to the function set with `setDebugFunction`,
+     * otherwise this has no effect.
+     *
+     * @param boolean $flag A value to evaluate to either `true` to turn on or `false` to turn off.
+     * @return boolean The current value of the debugging flag.
+     */
+    public function setDebugFlag($flag) {
+        $this->m_debug = ! ! $flag;
+        return $this->m_debug;
+    }
+
+    /**
      * Attempt to call the callback debug function if one was provided.
      * @param $message {string} A message to show in the log.
+     * @param $file {string} The PHP file that requested the debug.
+     * @param $line {integer} The line number in $file that requested the debug.
      */
-    public function debugCallback($message) {
+    public function debugCallback($message, $file, $line) {
         if ($this->m_debugFunction != null) {
-            call_user_func($this->m_debugFunction, $message);
+            call_user_func($this->m_debugFunction, $message, $file, $line);
         }
     }
 
     /**
-     * Call the debug function only when debugging is truned on.
+     * Call the debug function only when debugging is turned on.
      * @param $message {string} A message to show in the log while debugging is on.
      */
-    public function debugInfo($message) {
+    public function debugInfo($message, $file, $line) {
         if ($this->m_debug) {
-            $this->debugCallback($message);
+            $this->debugCallback($message, $file, $line);
         }
     }
 
@@ -1150,7 +1273,7 @@ class Enginesis
      * @return array A key/value array.
      */
     public function decodeURLParams ($encodedURLParams) {
-        $data = array();
+        $data = [];
         $arrayOfParameters = explode('&', $encodedURLParams);
         $i = 0;
         $numParameters = count($arrayOfParameters);
@@ -1180,14 +1303,14 @@ class Enginesis
     /**
      * Make sure we call the API with all the necessary parameters. We can assume some defaults from the
      * current session but they only are used when the caller does not provide a required parameter.
-     * @param $fn string: The API function to call
+     * @param $serviceName string: The API function to call
      * @param $parameters array: The API parameters as a key-value array
      * @return array The cleansed parameter array ready to call the requested API.
      */
-    public function serverParamObjectMake ($fn, $parameters) {
+    public function serverParamObjectMake ($serviceName, $parameters) {
         $serverParams = [];
         if (is_array($parameters) && count($parameters) > 0) {
-            $serverParams['fn'] = $fn;
+            $serverParams['fn'] = $serviceName;
             if ( ! isset($parameters['site_id'])) {
                 $serverParams['site_id'] = $this->m_siteId;
             }
@@ -1207,9 +1330,6 @@ class Enginesis
             $serverParams['site_id'] = $this->m_siteId;
             $serverParams['user_id'] = $this->m_userId;
             $serverParams['response'] = $this->m_responseFormat;
-        }
-        if ($this->m_authTokenWasValidated && ! isset($parameters['authtok'])) {
-            $serverParams['authtok'] = $this->m_authToken;
         }
         $serverParams['state_seq'] = ++ $this->m_syncId;
         return $serverParams;
@@ -1237,22 +1357,40 @@ class Enginesis
 
     /**
      * callServerAPI: Make an Enginesis API request over the WWW
-     * @param $fn {string} is the API service to call.
-     * @param $paramArray {array|null} key => value array of parameters e.g. array('site_id' => 100);
+     * @param $serviceName {string} is the API service to call.
+     * @param $parameters {array|null} key => value array of parameters e.g. array('site_id' => 100);
      * @return {object} response from server based on requested response format.
      */
-    private function callServerAPI ($fn, $paramArray) {
-        $parameters = $this->serverParamObjectMake($fn, $paramArray);
+    private function callServerAPI ($serviceName, $parameters) {
+        $headers = [];
+        $parameters = $this->serverParamObjectMake($serviceName, $parameters);
         $response = $parameters['response'];
         $setSSLCertificate = false;
+        $developerKey = $this->m_developerKey;
+        if ($developerKey != null) {
+            // Add developer key in header so it is not sent in body
+            $headers[] = 'X-DeveloperKey: ' . $developerKey;
+            // weed it out of passed in parameters if it is there so it doesnt appear in logs
+            unset($parameters['developer_key']);
+            unset($parameters['apikey']);
+        }
+        $authenticationToken = $this->m_authToken;
+        if ($authenticationToken != null && $this->m_authTokenWasValidated) {
+            // Move authentication token to header so it is not sent in body
+            $headers[] = 'Authorization: Bearer ' . $authenticationToken;
+            // weed it out of passed in parameters if it is there so it doesnt appear in logs
+            unset($parameters['authtok']);
+            unset($parameters['token']);
+        }
         $isLocalhost = serverStage() == '-l';
         $url = $this->m_serviceEndPoint;
         $setSSLCertificate = startsWith(strtolower($url), 'https://');
-        $this->debugInfo("Calling $fn with " . json_encode($parameters));
+        $this->debugInfo("Calling $serviceName with " . json_encode($parameters), __FILE__, __LINE__);
         $ch = curl_init($url);
         if ($ch) {
-            $referrer = serverName() . $this->currentPagePath();
-            curl_setopt($ch, CURLOPT_USERAGENT, 'Enginesis PHP SDK');
+            $referrer = $this->m_serviceProtocol . '://' . $this->getServerName() . $this->currentPagePath();
+            curl_setopt($ch, CURLOPT_USERAGENT, 'Enginesis PHP SDK ' . ENGINESIS_VERSION);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
             curl_setopt($ch, CURLOPT_REFERER, $referrer);
             curl_setopt($ch, CURLOPT_HEADER, 0);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
@@ -1268,7 +1406,7 @@ class Enginesis
                     curl_setopt($ch, CURLOPT_CAINFO, $certPath);
                     curl_setopt($ch, CURLOPT_CAPATH, $certPath);
                 } else {
-                    $this->debugCallback("callServerAPI Cant locate private certs $certPath");
+                    $this->debugCallback("callServerAPI Cant locate private certs $certPath", __FILE__, __LINE__);
                 }
             }
             curl_setopt($ch, CURLOPT_POST, 1);
@@ -1277,7 +1415,7 @@ class Enginesis
             $succeeded = $contents !== false && strlen($contents) > 0;
             if ( ! $succeeded) {
                 $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. ' . curl_error($ch);
-                $this->debugCallback($errorInfo);
+                $this->debugCallback($errorInfo, __FILE__, __LINE__);
                 $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
             }
             curl_close($ch);
@@ -1285,11 +1423,11 @@ class Enginesis
             $errorInfo = 'System error: unable to contact ' . $this->m_serviceEndPoint . ' or the server did not respond.';
             $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
         }
-        $this->debugInfo("callServerAPI response from $fn: $contents");
+        $this->debugInfo("callServerAPI response from $serviceName: $contents", __FILE__, __LINE__);
         if ($response == 'json') {
             $contentsObject = json_decode($contents);
-            if ($contentsObject == null) {
-                $this->debugCallback("callServerAPI could not parse server response as JSON: $contents");
+            if ($contentsObject === null) {
+                $this->debugCallback("callServerAPI could not parse server response as JSON: $contents", __FILE__, __LINE__);
             }
             return $contentsObject;
         } else {
@@ -1312,7 +1450,7 @@ class Enginesis
      * @return boolean: true if the error provided is an error, false if it is not.
      */
     public function isError ($lastErrorCode) {
-        if (! isset($lastErrorCode) || $lastErrorCode == null) {
+        if (! isset($lastErrorCode) || $lastErrorCode === null) {
             $lastErrorCode = $this->m_lastError;
         }
         return $lastErrorCode != null && $this->m_lastError['message'] != '';
@@ -1378,14 +1516,16 @@ class Enginesis
     }
 
     /**
-     * Return the URL of the request game image.
-     * @param gameName {string} game folder on server where the game assets are stored. Most of the game queries
-     *    (GameGet, GameList, etc) return game_name and this is used as the game folder.
-     * @param width {int} optional width, use null to ignore. Server will choose common width.
-     * @param height {int} optional height, use null to ignore. Server will choose common height.
-     * @param format {string} optional image format, use null and server will choose. Otherwise {jpg|png|svg}
-     * @returns {string} a URL you can use to load the image.
+     * Return the URL of the request game image. This takes the parameters supplied and requests
+     * from the back end the best fit image.
      * TODO: this really needs to call a server-side service to perform this resolution as we need to use PHP to determine which files are available and the closest match.
+     *
+     * @param string gameName game folder on server where the game assets are stored. Most of the game queries
+     *    (GameGet, GameList, etc) return game_name and this is used as the game folder.
+     * @param integer width optional width, use null to ignore. Server will choose common width.
+     * @param integer height optional height, use null to ignore. Server will choose common height.
+     * @param string format optional image format, use null and server will choose. Otherwise {jpg|png|svg}
+     * @return string A URL you can use to load the image.
      */
     public function getGameImageURL ($gameName, $width, $height, $format) {
         if (empty($width) || $width == '*') {
@@ -1397,28 +1537,28 @@ class Enginesis
         if (substr($format, 0, 1) != '.') {
             $format = '.' . $format;
         }
-        $regex = '/\.(jpg|png|svg)/i';
-        $found = preg_match($regex, $format);
-        if ($found == 0 || $found === false) {
+        $found = preg_match('/\.(jpg|png|svg)/i', $format);
+        if ($found === false || $found === 0) {
             $format = '.jpg';
         }
-        $path = $this->m_serviceRoot . 'games/' . $gameName . '/images/' . $width . 'x' . $height . $format;
+        $path = $this->m_serviceProtocol . '://' . $this->m_serviceHost . '/games/' . $gameName . '/images/' . $width . 'x' . $height . $format;
         return $path;
     }
 
     /**
      * The general public site get - returns a minimum set of public attributes about a site.
-     * @param $siteId {integer} an integer indicating a site_id.
+     *
+     * @param integer $siteId an integer indicating a site_id.
      * @return object A site info object containing only the public attributes.
      */
     public function siteGet ($siteId) {
-        $service = 'SiteGet';
+        $serviceName = 'SiteGet';
         $site = null;
         if ( ! is_numeric($siteId) || $siteId < 100) {
             $siteId = $this->m_siteId;
         }
         $parameters = ['site_id' => $siteId];
-        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        $enginesisResponse = $this->callServerAPI($serviceName, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && is_array($results)) {
             $site = $results[0];
@@ -1428,19 +1568,23 @@ class Enginesis
 
     /**
      * Call Enginesis SessionBegin which is used to start any conversation with the server. Must call before beginning a game.
-     * @param gameId
-     * @param gameKey
-     * @returns {Object} null if failed, user info if success.
+     * @param integer gameId The requested game id to start a session for.
+     * @param string gameKey The game key matching the game id.
+     * @return Object null if failed, a user info object if successful.
      */
     public function sessionBegin ($gameId, $gameKey) {
         $service = 'SessionBegin';
         $userInfo = null;
-        if (isEmpty($gameId)) {
+        if ( ! isValidId($gameId)) {
             $gameId = $this->m_gameId;
-            $gameKey = gameKeyMake($this->m_siteId, $gameId);
+            if (isValidId($gameId)) {
+                $gameKey = gameKeyMake($this->m_siteId, $gameId);
+            }
         }
-        if (isEmpty($gameKey)) {
+        if (isEmpty($gameKey) && isValidId($gameId)) {
             $gameKey = gameKeyMake($this->m_siteId, $gameId);
+        } else {
+            $gameKey = '';
         }
         $parameters = [
             'game_id' => $gameId,
@@ -1450,6 +1594,13 @@ class Enginesis
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && isset($results->row)) {
             $userInfo = $this->sessionRestoreFromResponse($results);
+        } else {
+            $errorCode = $this->getLastErrorCode();
+            if ($errorCode == EnginesisErrors::INVALID_PARAMETER || $errorCode == EnginesisErrors::INVALID_TOKEN) {
+                // if the refresh token is invalid then log this user out or else
+                // we will keep trying this bad token on every request.
+                $this->userLogout();
+            }
         }
         return $userInfo;
     }
@@ -1483,6 +1634,13 @@ class Enginesis
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null && isset($results->row)) {
             $userInfo = $this->sessionRestoreFromResponse($results);
+        } else {
+            $errorCode = $this->getLastErrorCode();
+            if ($errorCode == EnginesisErrors::INVALID_PARAMETER || $errorCode == EnginesisErrors::INVALID_TOKEN) {
+                // if the refresh token is invalid then log this user out or else
+                // we will keep trying this bad token on every request.
+                $this->userLogout();
+            }
         }
         return $userInfo;
     }
@@ -1571,21 +1729,26 @@ class Enginesis
     }
 
     /**
-     * Determine if user registration parameters are valid. If not, indicate the first parameter that is invalid.
-     * @param $user_id: id of existing user to validate, or 0/null if a new registration.
-     * @param $parameters: key/value object of registration data.
-     * @return array: keys that we think are unacceptable. null if acceptable.
-     * TODO: this is not implemented, returns null (OK) as a placeholder.
+     * Determine if user registration parameters are valid. If not, indicate each
+     * parameter that is invalid.
+     *
+     * @param integer $user_id Id of existing user to validate, or 0/null if a new registration.
+     * @param Array $parameters Key/value object of registration data.
+     * @return Array Keys that we think are unacceptable. null if everything is acceptable.
      */
     public function userRegistrationValidation ($user_id, $parameters) {
         $errors = [];
 
+        $key = 'agreement';
+        if ( ! isset($parameters[$key]) || ! $this->valueToBoolean($parameters[$key])) {
+            array_push($errors, $key);
+        }
         $key = 'user_name';
         if ( ! isset($parameters[$key]) || ! $this->isValidUserName($parameters[$key])) {
             array_push($errors, $key);
         }
         $key = 'email_address';
-        if ( ! isset($parameters[$key]) || ! checkEmailAddress($parameters[$key])) {
+        if ( ! isset($parameters[$key]) || ! $this->isValidEmailAddress($parameters[$key])) {
             array_push($errors, $key);
         }
         if ($user_id == 0) {
@@ -1648,12 +1811,14 @@ class Enginesis
 
     /**
      * Register a new user by calling the Enginesis function and wait for the response. We must convert and field data
-     *   from our version to the Enginesis version since we have multiple different ways to collect it.
+     * from our version to the Enginesis version since we have multiple different ways to collect it.
+     *
      * @param $userInfo {array} key/value object of registration data.
      * @return object: null if registration fails, otherwise returns the user info object and logs the user in.
      */
     public function userRegistration ($userInfo) {
         $service = 'RegisteredUserCreate';
+        // TODO: user_name, email_address, password are required. We can send it up to the server and wait for a response but we could save time and do it here.
         $parameters = [
             'user_name' => $userInfo['user_name'],
             'password' => $userInfo['password'],
@@ -1683,14 +1848,13 @@ class Enginesis
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null) {
-            $user_id = $results->row->user_id;
-            $secondary_password = $results->row->secondary_password;
-            $userInfoResult = $result->row;
+            $userInfoResult = $results->row;
+            $user_id = $userInfoResult->user_id;
+            $secondary_password = $userInfoResult->secondary_password;
             // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
             // We know this because the server gives us the token when we are to do this.
-            if (isset($results->row->authtok)) {
-                $userInfoResult['authtok'] = $results->row->authtok;
-                $this->sessionSave($results->row->authtok, $userInfoResult->user_id, $userInfoResult->user_name, $userInfoResult->site_user_id, $userInfoResult->access_level, EnginesisNetworks::Enginesis);
+            if (isset($userInfoResult->authtok)) {
+                $this->sessionSave($userInfoResult->authtok, $userInfoResult->user_id, $userInfoResult->user_name, $userInfoResult->site_user_id, $userInfoResult->access_level, EnginesisNetworks::Enginesis);
                 $this->sessionUserInfoSave($userInfoResult);
             }
         } else {
@@ -1750,12 +1914,13 @@ class Enginesis
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null) {
-            $results = $results->row;
+            $userInfoResult = $results->row;
             // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
             // We know this because the server gives us the token when we are to do this.
-            if (isset($results->authtok)) {
-                $this->sessionSave($results->authtok, $results->user_id, $results->user_name, $results->site_user_id, $results->access_level, EnginesisNetworks::Enginesis);
-                $this->sessionUserInfoSave($results);
+            if (isset($userInfoResult->authtok)) {
+                $this->sessionSave($userInfoResult->authtok, $userInfoResult->user_id, $userInfoResult->user_name, $userInfoResult->site_user_id, $userInfoResult->access_level, EnginesisNetworks::Enginesis);
+                $this->sessionUserInfoSave($userInfoResult);
+                $results = $userInfoResult;
             }
         }
         return $results;
@@ -1789,7 +1954,7 @@ class Enginesis
      * @return object: null if all acceptable. key/value pairs that we think are unacceptable. key is the field in error, value is the error message.
      */
     public function registeredUserSecurityValidation ($user_id, $mobile_number, $security_question_id, $security_question, $security_answer) {
-        $errors = array();
+        $errors = [];
         $key = 'mobile_number';
         $questionOK = true;
         if ( ! $this->isValidString($mobile_number, 7, 20, true, false)) {
@@ -1928,8 +2093,8 @@ class Enginesis
         $parameters = ['user_name' => $userName, 'email_address' => $email_address];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results == null) {
-            $this->debugCallback('userForgotPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info']);
+        if ($results === null) {
+            $this->debugCallback('userForgotPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info'], __FILE__, __LINE__);
         } else {
             if (is_array($results) && count($results) > 0) {
                 $results = $results[0];
@@ -1953,8 +2118,8 @@ class Enginesis
         $parameters = [];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results == null) {
-            $this->debugCallback('userResetPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info']);
+        if ($results === null) {
+            $this->debugCallback('userResetPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info'], __FILE__, __LINE__);
         }
         return $results;
     }
@@ -2126,6 +2291,36 @@ class Enginesis
             'event_id' => $event,
             'event_details' => $eventDetails,
             'referrer' => $referrer
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        $results = $this->setLastErrorFromResponse($enginesisResponse);
+        return $results != null;
+    }
+
+    /**
+     * Subscribe an email address to the site newsletter or newsletter based by category selected.
+     */
+    public function newsletterAddressAssign ($emailAddress, $userName = '', $companyName = '', $categories = '') {
+        $service = 'NewsletterAddressAssign';
+        $parameters = [
+            'email_address' => $emailAddress,
+            'user_name' => $userName,
+            'company_name' => $companyName,
+            'categories' => $categories
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        $results = $this->setLastErrorFromResponse($enginesisResponse);
+        return $results != null;
+    }
+
+    /**
+     * Unsubscribe the email address from all newsletters.
+     */
+    public function newsletterAddressDelete ($emailAddress, $newsletterAddressId = 0) {
+        $service = 'NewsletterAddressDelete';
+        $parameters = [
+            'email_address' => $emailAddress,
+            'newsletter_address_id' => $newsletterAddressId
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);

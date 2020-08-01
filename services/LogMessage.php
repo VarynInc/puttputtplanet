@@ -49,12 +49,31 @@ class LogMessage
     private static function _defaultFileWritablePath () {
         // determines where there is a secured writable area we can manipulate file storage
         // Because this is a static function we don't yet have our constant defined SERVER_DATA_PATH
+        $logSubPath = '/data/logs/';
         if (isset($_SERVER['DOCUMENT_ROOT']) && strlen($_SERVER['DOCUMENT_ROOT']) > 0) {
-            $serverRootPath = dirname($_SERVER['DOCUMENT_ROOT']) . '/';
+            // when running on a web server, we're in the public folder, go up one level.
+            $serverRootPath = dirname($_SERVER['DOCUMENT_ROOT']);
         } else {
-            $serverRootPath = './';
+            // When not running on a web server, we have to find the root folder.
+            // This will only work if running from a folder within the project.
+            $serverRootPath = null;
+            $currentDirectory = __DIR__;
+            $expectedBaseFolder = 'enginesis';
+            $checkLength = strlen($expectedBaseFolder);
+            while ($currentDirectory != '') {
+                $currentFolder = basename($currentDirectory);
+                if (strncmp($currentFolder, $expectedBaseFolder, $checkLength) === 0) {
+                    $serverRootPath = $currentDirectory;
+                    break;
+                } else {
+                    $currentDirectory = dirname($currentDirectory);
+                }
+            }
+            if ($serverRootPath == null) {
+                $serverRootPath = '.';
+            }
         }
-        return $serverRootPath . 'data/logs/';
+        return $serverRootPath . $logSubPath;
     }
 
     /**
@@ -73,18 +92,27 @@ class LogMessage
      * @param $message
      */
     private function _logToFile ($message) {
+        $setFilePermissions = false;
         try {
-            $logfile = fopen($this->_activeLogFileName, 'a');
+            if ( ! file_exists($this->_activeLogFileName)) {
+                $setFilePermissions = true;
+            }
+            $logfile = fopen($this->_activeLogFileName, 'ab');
             if ($logfile) {
                 fwrite($logfile, "$message\r\n");
                 fclose($logfile);
+                if ($setFilePermissions) {
+                    chmod($this->_activeLogFileName, 0666);
+                }
             } else {
                 $this->_isValid = false;
-                error_log("LogMessage file system error on $this->_activeLogFileName: $message\n");
+                $phpError = error_get_last()['message'];
+                error_log("LogMessage file system error $phpError on $this->_activeLogFileName: $message\n");
             }
         } catch (Exception $e) {
             $this->_isValid = false;
-            error_log("LogMessage.logToFile exception on $this->_activeLogFileName: $message\n");
+            $phpError = error_get_last()['message'];
+            error_log("LogMessage.logToFile exception $phpError on $this->_activeLogFileName: $message\n");
         }
     }
 
@@ -179,7 +207,7 @@ class LogMessage
      * @return bool true if any bit matches
      */
     private function levelMatch($level) {
-        return ($this->_logLevel & $level) > 0;
+        return ((int) $this->_logLevel & (int) $level) > 0;
     }
 
     /**

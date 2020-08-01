@@ -69,12 +69,17 @@ function setErrorReporting ($reportingFlag) {
  */
 function reportError($msg, $file = '', $line = 0, $fn = '') {
     global $enginesisLogger;
+    $stackTrace = null;
 
     if (strlen($file) == 0) {
-        $file = __FILE__; // TODO: This makes no sense, maybe try to get the call stack?
+        $stackTrace = debug_backtrace(FALSE, 1);
+        $file = $stackTrace[1]['file'];
     }
     if ($line < 1) {
-        $line = __LINE__;
+        if ($stackTrace == null) {
+            $stackTrace = debug_backtrace(FALSE, 1);
+        }
+        $line = $stackTrace[1]['line'];
     }
     if (strlen($fn) > 0) {
         $msg = "$fn | " . $msg;
@@ -584,7 +589,7 @@ function verifyStage($includePassedTests = false) {
  * @return string server host name only, e.g. www.enginesis.com.
  */
 function serverName () {
-    $serverName = isset($_SERVER['HTTP_X_FORWARDED_HOST']) ? $_SERVER['HTTP_X_FORWARDED_HOST'] : isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'enginesis-l.com';
+    $serverName = isset($_SERVER['HTTP_X_FORWARDED_HOST']) ? $_SERVER['HTTP_X_FORWARDED_HOST'] : (isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'enginesis-l.com');
     if (strpos($serverName, ':') !== false ) {
         $serverName = substr($serverName, 0, strpos($serverName, ':'));
     }
@@ -837,18 +842,42 @@ function randomString ($length, $maxCodePoint = 32, $reseed = false) {
  */
 function makeInputFormHackerToken () {
     global $enginesis;
-    $expirationTime = 30;
+    $expirationTime = 30; // 30 minutes. TODO: Is this a reasonable amount of time?
     $hackerToken = md5($enginesis->getServerName()) . '' . floor(time() / ($expirationTime * 60));
     return $hackerToken;
 }
 
 /**
  * Given a token from an input form check to verify it has not yet expired.
- * @param $token generated with makeInputFormHackerToken.
+ * @param string $token generated with makeInputFormHackerToken.
  * @return boolean true when the token is good.
  */
 function validateInputFormHackerToken ($token) {
     return makeInputFormHackerToken() == $token;
+}
+
+/**
+ * Helper function to verify the form hack prevention are verified. There are two checks performed on a
+ * page that has an input form that tends to get hacked by bots:
+ * 
+ * 1. An input field that asks for an email address, but we expect it to be empty. A real user will not enter a value in this field (typically it is hidden.)
+ * 2. A time-out token is placed in a hidden field in the form. If the form is submitted after this timer times out we reject the submission (took too long.)
+ * 
+ * @param array $inputFormNames an array of field names used on the current page form to check for the inputs.
+ *   Order dependent. By default we use 'emailaddress' and 'all-clear'.
+ *   'emailaddress' is a form input that is a honeypot, we expect this to be empty, but a hacker would be compelled to fill in a value.
+ *   'all-clear' is a form field that holds the timeout token generated from `makeInputFormHackerToken()`.
+ * @return boolean a `true` value indicates the form passes the checks, and `false` indicates a possible hack attempt.
+ */
+function verifyFormHacks($inputFormNames) {
+    if ($inputFormNames == null || $inputFormNames == []) {
+        $inputFormNames = ['emailaddress', 'all-clear'];
+    }
+    $thisFieldMustBeEmpty = isset($_POST[$inputFormNames[0]]) ? $_POST[$inputFormNames[0]] : 'hacker';
+    $hackerToken = isset($_POST[$inputFormNames[1]]) ? $_POST[$inputFormNames[1]] : '0';
+    $isVerified = $thisFieldMustBeEmpty === '' && validateInputFormHackerToken($hackerToken);
+    debugLog("verifyFormHacks token=$hackerToken (try " . makeInputFormHackerToken() . ") honeypot='$thisFieldMustBeEmpty' result " . ($isVerified ? 'OK' : 'HACK!'));
+    return $isVerified;
 }
 
 /**
@@ -998,22 +1027,22 @@ function endsWith($haystack, $needle) {
  * @return string the transformed string.
  */
 function safeForHTML ($string) {
-    $htmlEscapeMap = array(
+    $htmlEscapeMap = [
         '&' => '&amp;',
         '<' => '&lt;',
         '>' => '&gt;',
         '"' => '&quot;',
         "'" => '&#x27;',
         '/' => '&#x2F;'
-    );
-    $htmlEscapePattern = array(
+    ];
+    $htmlEscapePattern = [
         '/&/',
         '/</',
         '/>/',
         '/"/',
         '/\'/',
         '/\//'
-    );
+    ];
     return preg_replace($htmlEscapePattern, $htmlEscapeMap, $string);
 }
 
@@ -1222,32 +1251,63 @@ function checkEmailAddress ($email) {
     return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
 }
 
+/**
+ * Clean extended characters out of the string. This helps sanitize strings for general
+ * display cases. For example, clean up a Microsoft Word copyied string for more general
+ * usage. Extended characters converted to their common ascii equivalent.
+ * 
+ * @param string $input A string to clean.
+ * @return string The $input string with any extended characters converted to their common ascii equivalent.
+ */
 function cleanString ($input) {
-    // clean extended chars out of the string
-    $search = array(
+    $search = [
         '/[\x60\x82\x91\x92\xb4\xb8]/i',             // single quotes
         '/[\x84\x93\x94]/i',                         // double quotes
         '/[\x85]/i',                                 // ellipsis ...
         '/[\x00-\x0d\x0b\x0c\x0e-\x1f\x7f-\x9f]/i'   // all other non-ascii
-    );
-    $replace = array(
+    ];
+    $replace = [
         '\'',
         '"',
         '...',
         ''
-    );
+    ];
     return preg_replace($search, $replace, $input);
 }
 
-function cleanFilename ($filename) {
-    return str_replace(array('\\', '/', ':', '*', '?', '"', '<', '>', '|'), '', $filename);
+/**
+ * Remove non-ASCII extended characters and convert HTML to entities.
+ * @param string $source The string to clean.
+ * @return string The source string cleaned of all bad characters.
+ */
+function fullyCleanString($source) {
+    return htmlspecialchars(cleanString($source));
 }
 
-function strip_tags_attributes ($sSource, $aAllowedTags = array(), $aDisabledAttributes = array('onclick', 'ondblclick', 'onkeydown', 'onkeypress', 'onkeyup', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onunload')) {
-    if (empty($aDisabledEvents)) {
-        return strip_tags($sSource, implode('', $aAllowedTags));
+/**
+ * Clean a proposed file name of any undesired characters and return a nice file name.
+ * 
+ * @param {string} $fileName A proposed file name.
+ * @returns {string} Proposed file name with undesired characters removed.
+ */
+function cleanFileName ($fileName) {
+    return str_replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|', '`', '\''], '', $fileName);
+}
+
+/**
+ * Strip HTML tags and javascript handlers from the source string.
+ * 
+ * @param string $source A source string to clean of any HTML tags.
+ * @param array $allowedTags An array of strings indicating any HTML tags that are allowed and should not be stripped.
+ *    Tags must be specified with the angle braces, such as "<div>". Close tags are not required.
+ * @param array $disabledAttributes An array of tag attributes that are to be stripped.
+ * @return string A version of $source with HTM tags and indicated attributes removed.
+ */
+function stripTagsAttributes ($source, $allowedTags = [], $disabledAttributes = ['onclick', 'ondblclick', 'onkeydown', 'onkeypress', 'onkeyup', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onunload']) {
+    if (empty($disabledAttributes)) {
+        return strip_tags($source, implode('', $allowedTags));
     } else {
-        return preg_replace('/<(.*?)>/ie', "'<' . preg_replace(array('/javascript:[^\"\']*/i', '/(" . implode('|', $aDisabledAttributes) . ")=[\"\'][^\"\']*[\"\']/i', '/\s+/'), array('', '', ' '), stripslashes('\\1')) . '>'", strip_tags($sSource, implode('', $aAllowedTags)));
+        return preg_replace('/<(.*?)>/i', "'<' . preg_replace(array('/javascript:[^\"\']*/i', '/(" . implode('|', $disabledAttributes) . ")=[\"\'][^\"\']*[\"\']/i', '/\s+/'), array('', '', ' '), stripslashes('\\1')) . '>'", strip_tags($source, implode('', $allowedTags)));
     }
 }
 
@@ -1637,8 +1697,7 @@ $enginesisLogger = new LogMessage([
 ]);
 $page = '';
 $webServer = '';
-$enginesis = new Enginesis($siteId, null, $developerKey);
-$enginesis->setDebugFunction('reportError');
+$enginesis = new Enginesis($siteId, null, $developerKey, 'reportError');
 $serverName = $enginesis->getServerName();
 $serverStage = $enginesis->getServerStage();
 // turn on errors for all stages except LIVE TODO: Remove from above when we are going live.
