@@ -157,16 +157,6 @@ class Enginesis {
     }
 
     /**
-     * Helper method to convert an Enginesis server response to a result set or null if we cannot find the results.
-     * Sometimes the results are provided as an array of rows, sometimes it is one row, depending on API.
-     * @param $serverResponse
-     * @return null|array
-     */
-    private function resultsFromServerResponse($serverResponse) {
-        return ($serverResponse != null && isset($serverResponse[0])) ? $serverResponse[0] : null;
-    }
-
-    /**
      * Create a failed response for cases when we are going to fail locally without transaction
      * with the server.
      */
@@ -651,9 +641,10 @@ class Enginesis {
 
     /**
      * If the API call returned an error this function sets the lastError object. If there was no error then
-     * lastError is null.
-     * @param $enginesisResponse A response object from an Enginesis API call.
-     * @return null|object Returns null if an error occurred (weird, right? but other logic already depends on this.)
+     * lastError is null. Call $enginesis->getLastError() to work with the error information.
+     *
+     * @param object $enginesisResponse A response object from an Enginesis API call.
+     * @return null|Array Returns null if an error occurred, an array of result "rows" if succeeded. If no results, then it usually is an empty array.
      */
     private function setLastErrorFromResponse ($enginesisResponse) {
         $results = null;
@@ -758,7 +749,7 @@ class Enginesis {
         $timestamp = time();
         // PHP timestamps are in seconds, JavaScript timestamps are in milliseconds. :(
         $timestampJS = $timestamp * 1000;
-        $refreshTokenJSON = '{"refreshToken":"'. $refreshToken . '","timestamp":"' . $timestampJS . '"}';
+        $refreshTokenJSON = '{"refresh_token":"'. $refreshToken . '","timestamp":"' . $timestampJS . '"}';
         setcookie(REFRESH_COOKIE, $refreshTokenJSON, $timestamp + (365 * 24 * 60 * 60), '/', $this->sessionCookieDomain());
         return $this->m_refreshToken;
     }
@@ -1051,27 +1042,30 @@ class Enginesis {
      * @return object of user info.
      */
     private function sessionRestoreFromResponse($serverResponse) {
-        $userInfo = $serverResponse->row;
-        if ($userInfo && isset($userInfo->authtok)) {
-            if (! isset($userInfo->user_id)) {
-                $userData = $this->authTokenDecrypt($userInfo->authtok);
-                if ($userData !== null) {
-                    $userInfo->site_id = $userData['siteid'];
-                    $userInfo->user_id = $userData['userid'];
-                    $userInfo->user_name = $userData['username'];
-                    $userInfo->site_user_id = $userData['siteuserid'];
-                    $userInfo->access_level = $userData['accesslevel'];
-                    $userInfo->network_id = $userData['networkid'];
+        $userInfo = null;
+        if (is_array($serverResponse) && count($serverResponse) > 0) {
+            $userInfo = $serverResponse[0];
+            if ($userInfo && isset($userInfo->authtok)) {
+                if (! isset($userInfo->user_id)) {
+                    $userData = $this->authTokenDecrypt($userInfo->authtok);
+                    if ($userData !== null) {
+                        $userInfo->site_id = $userData['siteid'];
+                        $userInfo->user_id = $userData['userid'];
+                        $userInfo->user_name = $userData['username'];
+                        $userInfo->site_user_id = $userData['siteuserid'];
+                        $userInfo->access_level = $userData['accesslevel'];
+                        $userInfo->network_id = $userData['networkid'];
+                    }
                 }
+                $this->sessionSave($userInfo->authtok, $userInfo->user_id, $userInfo->user_name, $userInfo->site_user_id, $userInfo->access_level, $userInfo->network_id);
+                $this->sessionUserInfoSave($userInfo);
+                $this->m_refreshedUserInfo = $userInfo;
+                $this->debugInfo("Restored m_refreshedUserInfo from sessionRestoreFromResponse " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
             }
-            $this->sessionSave($userInfo->authtok, $userInfo->user_id, $userInfo->user_name, $userInfo->site_user_id, $userInfo->access_level, $userInfo->network_id);
-            $this->sessionUserInfoSave($userInfo);
-            $this->m_refreshedUserInfo = $userInfo;
-            $this->debugInfo("Restored m_refreshedUserInfo from sessionRestoreFromResponse " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
-        } else {
+        }
+        if ($userInfo === null) {
             $this->debugInfo("BAD UserInfo from sessionRestoreFromResponse " . json_encode($serverResponse), __FILE__, __LINE__);
             echo("BAD UserInfo from sessionRestoreFromResponse " . json_encode($serverResponse));
-            $userInfo = null;
         }
         return $userInfo;
     }
@@ -1377,7 +1371,7 @@ class Enginesis {
         $authenticationToken = $this->m_authToken;
         if ($authenticationToken != null && $this->m_authTokenWasValidated) {
             // Move authentication token to header so it is not sent in body
-            $headers[] = 'Authorization: Bearer ' . $authenticationToken;
+            $headers[] = 'Authentication: Bearer ' . $authenticationToken;
             // weed it out of passed in parameters if it is there so it doesnt appear in logs
             unset($parameters['authtok']);
             unset($parameters['token']);
@@ -1475,11 +1469,12 @@ class Enginesis {
     /**
      * Given an Enginesis response object, pull out the status message information.
      * This is a helper function because doing this for every API call is a bit tedious.
-     * @param $enginesisResponse {object} the enginesis response object returned from callServerAPI
-     * @param $success {bool} true if API succeeded, false when failed
-     * @param $statusMessage {string} error message, empty if success is true
-     * @param $extendedInfo {string} optional additional information about the error
-     * @return {object} array or rows if succeeded, null when failed
+     *
+     * @param object $enginesisResponse The enginesis response object returned from callServerAPI.
+     * @param boolean $success True/1 if API succeeded, false/0 when failed.
+     * @param string $statusMessage Error code, empty if success is true/1.
+     * @param string $extendedInfo Optional additional information about the error.
+     * @return Array Array of rows if succeeded, null when failed.
      */
     public function getResponseStatus ($enginesisResponse, & $success, & $statusMessage, & $extendedInfo) {
         $success = false;
@@ -1497,10 +1492,12 @@ class Enginesis {
                         $extendedInfo = $status->extended_info;
                     }
                     if ($success) {
-                        if (isset($results->results)) {
-                            $resultSet = $results->results;
-                        } elseif (isset($results->result)) {
+                        if (isset($results->result)) {
+                            // usually result is an array of rows.
                             $resultSet = $results->result;
+                        } elseif (isset($results->row)) {
+                            // "row" was a legacy from XML, we should not see this with JSON.
+                            $resultSet = $results->row;
                         }
                     }
                 } else {
@@ -1560,7 +1557,7 @@ class Enginesis {
         $parameters = ['site_id' => $siteId];
         $enginesisResponse = $this->callServerAPI($serviceName, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && is_array($results)) {
+        if (is_array($results) && count($results) > 0) {
             $site = $results[0];
         }
         return $site;
@@ -1592,7 +1589,7 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results->row)) {
+        if ($results != null) {
             $userInfo = $this->sessionRestoreFromResponse($results);
         } else {
             $errorCode = $this->getLastErrorCode();
@@ -1632,7 +1629,7 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results->row)) {
+        if ($results != null) {
             $userInfo = $this->sessionRestoreFromResponse($results);
         } else {
             $errorCode = $this->getLastErrorCode();
@@ -1661,7 +1658,7 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results->row)) {
+        if ($results != null) {
             $userInfo = $this->sessionRestoreFromResponse($results);
         }
         return $userInfo;
@@ -1847,8 +1844,10 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null) {
-            $userInfoResult = $results->row;
+        if (is_array($results) && count($results) > 0) {
+            $userInfoResult = $results[0];
+            $cr = $userInfoResult->cr;
+            // TODO: Verify hash to make sure payload was not tampered
             $user_id = $userInfoResult->user_id;
             $secondary_password = $userInfoResult->secondary_password;
             // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
@@ -1891,7 +1890,7 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null) {
+        if (is_array($results) && count($results) > 0) {
             $results = $results[0];
         }
         return $results;
@@ -1913,8 +1912,9 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null) {
-            $userInfoResult = $results->row;
+        if (is_array($results) && count($results) > 0) {
+            $userInfoResult = $results[0];
+            // TODO: Verify hash to make sure payload was not tampered
             // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
             // We know this because the server gives us the token when we are to do this.
             if (isset($userInfoResult->authtok)) {
@@ -1927,7 +1927,8 @@ class Enginesis {
     }
 
     /**
-     * Get the security info for the current logged in user. Returns {mobile_number, security_question_id, security_question, security_answer}
+     * Get the security info for the current logged in user.
+     * Returns {mobile_number, security_question_id, security_question, security_answer}
      * @return null|object
      */
     public function registeredUserSecurityGet () {
@@ -1938,8 +1939,10 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null) {
+        if (is_array($results) && count($results) > 0) {
             $results = $results[0];
+        } else {
+            $results = null;
         }
         return $results;
     }
@@ -2003,8 +2006,10 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null) {
+        if (is_array($results) && count($results) > 0) {
             $results = $results[0];
+        } else {
+            $results = null;
         }
         return $results;
     }
@@ -2019,8 +2024,10 @@ class Enginesis {
         $parameters = [];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null) {
+        if (is_array($results) && count($results) > 0) {
             $results = $results[0];
+        } else {
+            $results = null;
         }
         return $results;
     }
@@ -2043,10 +2050,10 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && is_array($results)) {
+        if (is_array($results) && count($results) > 0) {
             $results = $results[0];
-        } elseif ($results != null && isset($results->row)) {
-            $results = $results->row;
+        } else {
+            $results = null;
         }
         return $results;
     }
@@ -2071,12 +2078,10 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null) {
-            if (is_array($results) && count($results) > 0) {
-                $results = $results[0];
-            } else {
-                $results = $results->row;
-            }
+        if (is_array($results) && count($results) > 0) {
+            $results = $results[0];
+        } else {
+            $results = null;
         }
         return $results;
     }
@@ -2093,19 +2098,13 @@ class Enginesis {
         $parameters = ['user_name' => $userName, 'email_address' => $email_address];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results === null) {
-            $this->debugCallback('userForgotPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info'], __FILE__, __LINE__);
+        if (is_array($results) && count($results) > 0) {
+            $result = $results[0];
         } else {
-            if (is_array($results) && count($results) > 0) {
-                $results = $results[0];
-            }
-            if ($results != null && isset($results->row)) {
-                $results = $results->row;
-            } elseif ($results != null && is_array($results) && count($results) > 0 && isset($result['row'])) {
-                $results = $results['row'];
-            }
+            $result = null;
+            $this->debugCallback('userForgotPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info'], __FILE__, __LINE__);
         }
-        return $results;
+        return $result;
     }
 
     /**
@@ -2117,11 +2116,7 @@ class Enginesis {
         $service = 'RegisteredUserResetPassword';
         $parameters = [];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results === null) {
-            $this->debugCallback('userResetPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info'], __FILE__, __LINE__);
-        }
-        return $results;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2135,8 +2130,7 @@ class Enginesis {
         $service = 'RegisteredUserVerifyForgotPassword';
         $parameters = ['user_id' => $userId, 'password' => $newPassword, 'token' => $token];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $results != null;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2151,8 +2145,7 @@ class Enginesis {
         $service = 'RegisteredUserResetSecondaryPassword';
         $parameters = ['user_id' => $userId, 'secondary_password' => $secondaryPassword];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $results != null;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2173,7 +2166,7 @@ class Enginesis {
             $enginesisResponse = $this->callServerAPI($service, ['user_name' => $userId]);
         }
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && is_array($results)) {
+        if (is_array($results) && count($results) > 0) {
             $user = $results[0];
         }
         return $user;
@@ -2191,7 +2184,7 @@ class Enginesis {
             $parameters = ['user_name' => $userName];
             $enginesisResponse = $this->callServerAPI($service, $parameters);
             $results = $this->setLastErrorFromResponse($enginesisResponse);
-            if ($results != null && isset($results[0])) {
+            if (is_array($results) && count($results) > 0) {
                 $user = $results[0];
             }
         }
@@ -2223,7 +2216,7 @@ class Enginesis {
         }
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
+        if (is_array($results) && count($results) > 0) {
             $results = $results[0];
         }
         return $results;
@@ -2254,7 +2247,7 @@ class Enginesis {
         }
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
+        if (is_array($results) && count($results) > 0) {
             $results = $results[0];
         }
         return $results;
@@ -2270,8 +2263,7 @@ class Enginesis {
         $service = 'RegisteredUserGetEx';
         $parameters = ['search_str' => $searchString];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $results;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2293,8 +2285,7 @@ class Enginesis {
             'referrer' => $referrer
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $results != null;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2309,8 +2300,7 @@ class Enginesis {
             'categories' => $categories
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $results != null;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2323,8 +2313,7 @@ class Enginesis {
             'newsletter_address_id' => $newsletterAddressId
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $results != null;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2351,7 +2340,7 @@ class Enginesis {
         $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
+        if (is_array($results) && count($results) > 0) {
             $gameInfo = $results[0];
         } else {
             $gameInfo = null;
@@ -2369,7 +2358,7 @@ class Enginesis {
         $parameters = ['game_name' => $gameName];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
+        if (is_array($results) && count($results) > 0) {
             $gameInfo = $results[0];
         } else {
             $gameInfo = null;
@@ -2388,7 +2377,7 @@ class Enginesis {
             'rating' => ($rating < 0 || $rating > 100) ? 5 : $rating];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
+        if (is_array($results) && count($results) > 0) {
             $gameInfo = $results[0];
         } else {
             $gameInfo = null;
@@ -2404,7 +2393,7 @@ class Enginesis {
         $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
+        if (is_array($results) && count($results) > 0) {
             $gameInfo = $results[0];
         } else {
             $gameInfo = null;
@@ -2419,13 +2408,7 @@ class Enginesis {
         $service = 'GameRatingList';
         $parameters = ['num_items' => ($numberOfGames < 1 || $numberOfGames > 100) ? 5 : $numberOfGames];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
-            $gameList = $results[0];
-        } else {
-            $gameList = null;
-        }
-        return $gameList;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2442,13 +2425,7 @@ class Enginesis {
         }
         $parameters = ['game_id_list' => $listOfGameIds, 'delimiter' => $delimiter];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
-            $gameList = $results[0];
-        } else {
-            $gameList = null;
-        }
-        return $gameList;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2463,13 +2440,7 @@ class Enginesis {
             'security_key' => $securityKey
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
-            $response = $results[0];
-        } else {
-            $response = null;
-        }
-        return $response;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2481,13 +2452,7 @@ class Enginesis {
             'vote_group_uri' => $voteGroupURI
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
-            $response = $results[0];
-        } else {
-            $response = null;
-        }
-        return $response;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2499,13 +2464,7 @@ class Enginesis {
             'developer_id' => $developerId
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
-            $response = $results[0];
-        } else {
-            $response = null;
-        }
-        return $response;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2515,13 +2474,7 @@ class Enginesis {
         $service = 'GameDataGet';
         $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        if ($results != null && isset($results[0])) {
-            $response = $results[0];
-        } else {
-            $response = null;
-        }
-        return $response;
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2531,8 +2484,7 @@ class Enginesis {
         $service = 'UserFavoriteGamesList';
         $parameters = [];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2542,8 +2494,7 @@ class Enginesis {
         $service = 'UserFavoriteGamesAssign';
         $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2559,8 +2510,7 @@ class Enginesis {
             'delimiter' => ','
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2570,8 +2520,7 @@ class Enginesis {
         $service = 'UserFavoriteGamesDelete';
         $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2587,8 +2536,7 @@ class Enginesis {
             'delimiter' => ','
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2601,8 +2549,7 @@ class Enginesis {
             'sort_order' => $sortOrder
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     // =============================================================================================================
@@ -2623,8 +2570,7 @@ class Enginesis {
             'show_items' => $showItems ? '1' : '0'
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2672,7 +2618,12 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        if (is_array($results) && count($results) > 0) {
+            $result = $results[0];
+        } else {
+            $result = null;
+        }
+        return $result;
     }
 
     /**
@@ -2693,7 +2644,12 @@ class Enginesis {
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
-        return $this->resultsFromServerResponse($results);
+        if (is_array($results) && count($results) > 0) {
+            $result = $results[0];
+        } else {
+            $result = null;
+        }
+        return $result;
     }
 
     /**

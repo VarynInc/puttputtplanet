@@ -284,6 +284,18 @@ function processTrackBack () {
 }
 
 /**
+ * If a search query was requested from the top page nav then redirect
+ * to the search page to handle the request.
+ */
+function processSearchRequest() {
+    $search = getPostOrRequestVar('q', null);
+    if ($search != null) {
+        header('location:/games/?q=' . $search);
+        exit;
+    }
+}
+
+/**
  * The blowfish encryption algorithm requires data length is a multiple of 8 bytes. This
  * function pads the string to the nearest 8 byte boundary.
  */
