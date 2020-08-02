@@ -62,7 +62,7 @@
         platform: "",
         locale: "en-US",
         isNativeBuild: false,
-        isBrowserBuild: typeof window !== "undefined" && typeof window.document !== "undefined" && typeof window.location !== "undefined",
+        isBrowserBuild: typeof global.window !== "undefined" && typeof global.window.document !== "undefined" && typeof global.window.location !== "undefined",
         isNodeBuild: typeof process !== "undefined" && process.versions != null && process.versions.node != null,
         isTouchDeviceFlag: false,
         SESSION_COOKIE: "engsession",
@@ -696,9 +696,9 @@
 
     /**
      * If we cannot use fetch() on this browser then fall back to XMLHTTPRequest.
-     * @param serviceName {string}
-     * @param parameters {object}
-     * @param overRideCallBackFunction {function}
+     * @param {string} serviceName
+     * @param {object} parameters
+     * @param {function} overRideCallBackFunction
      * @returns {boolean} true if a request is sent, false if the request was not sent.
      */
     function sendRequestPolyfill(serviceName, parameters, overRideCallBackFunction) {
@@ -729,14 +729,12 @@
 
     /**
      * When running as a Node.js process we can use request(). request must be required separately.
-     * @param serviceName {string}
-     * @param parameters {object}
-     * @param overRideCallBackFunction {function}
-     * @returns {boolean} true if a request is sent, false if the request was not sent.
+     * @param {string} serviceName The Enginesis service to call.
+     * @param {object} enginesisParameters Parameters required for the service, assumes this object was created or verified with serverParamObjectMake().
+     * @param {function} overRideCallBackFunction Callback function to call when the request completes.
+     * @return {boolean} True if a request is sent, false if the request was not sent.
      */
-    function sendNodeRequest(serviceName, parameters, overRideCallBackFunction) {
-        var enginesisParameters = serverParamObjectMake(serviceName, parameters);
-
+    function sendNodeRequest(serviceName, enginesisParameters, overRideCallBackFunction) {
         if (enginesis.nodeRequest == null) {
             enginesis.nodeRequest = require('request');
             if (enginesis.nodeRequest == null) {
@@ -746,20 +744,20 @@
         enginesis.nodeRequest.post({
             method: "POST",
             url: enginesis.siteResources.serviceURL,
-            body: convertParamsToFormData(enginesisParameters),
-            headers: formatHTTPHeader()
+            headers: formatHTTPHeader(),
+            formData: convertParamsToFormData(enginesisParameters)
         }, function(requestError, response, body) {
                 if (requestError != null) {
                     var errorMessage = "Error posting to " + enginesis.siteResources.serviceURL + ": " + requestError.toString();
                     if (setOffline()) {
-                        errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + requestError.toString();
+                        errorMessage = "Enginesis network error encountered, assuming we're offline. " + enginesis.siteResources.serviceURL + " for " + serviceName + ": " + requestError.toString();
                     } else {
                         errorMessage = "Enginesis is already offline, leaving this message on the queue.";
                     }
                     debugLog(errorMessage);
-                    requestCompleteXMLHTTP(parameters.state_seq, forceErrorResponseString(serviceName, parameters.state_seq, "OFFLINE", errorMessage), overRideCallBackFunction);
+                    requestCompleteXMLHTTP(enginesisParameters.state_seq, forceErrorResponseString(serviceName, enginesisParameters.state_seq, "OFFLINE", errorMessage), overRideCallBackFunction);
                 } else {
-                    requestCompleteXMLHTTP(parameters.state_seq, body, overRideCallBackFunction);
+                    requestCompleteXMLHTTP(enginesisParameters.state_seq, body, overRideCallBackFunction);
                 }
             }
         );
@@ -938,7 +936,8 @@
      */
     function serverParamObjectMake (serviceName, additionalParameters) {
         enginesis.internalStateSeq += 1;
-        var serverParams = { // these are defaults that could be overridden with additionalParameters
+        // these are defaults that could be overridden with additionalParameters
+        var serverParams = {
             fn: serviceName,
             language_code: enginesis.languageCode,
             site_id: enginesis.siteId,
@@ -1107,8 +1106,8 @@
 
     /**
      * Set the server stage we will converse with using some simple heuristics.
-     * @param newServerStage
-     * @returns {*}
+     * @param {string} newServerStage
+     * @returns {string}
      */
     function qualifyAndSetServerStage (newServerStage) {
         var regMatch;
@@ -1251,8 +1250,8 @@
      * @returns {string} value Contents of cookie stored with key.
      */
     function cookieGet (key) {
-        if (typeof document !== "undefined" && key) {
-            return decodeURIComponent(document.cookie.replace(new RegExp("(?:(?:^|.*;)\\s*" + encodeURIComponent(key).replace(/[\-\.\+\*]/g, "\\$&") + "\\s*\\=\\s*([^;]*).*$)|^.*$"), "$1")) || null;
+        if (typeof global.document !== "undefined" && key) {
+            return decodeURIComponent(global.document.cookie.replace(new RegExp("(?:(?:^|.*;)\\s*" + encodeURIComponent(key).replace(/[\-\.\+\*]/g, "\\$&") + "\\s*\\=\\s*([^;]*).*$)|^.*$"), "$1")) || null;
         } else {
             return "";
         }
@@ -1273,11 +1272,14 @@
         var expires = "";
         var neverExpires = "; expires=Fri, 31 Dec 9999 23:59:59 GMT";
 
+        if (typeof global.document === "undefined") {
+            return false;
+        }
         if ( ! key || /^(?:expires|max\-age|path|domain|secure)$/i.test(key)) {
             return false;
         } else {
             if (value === null) {
-                document.cookie = encodeURIComponent(key) + "=; expires=Thu, 01 Jan 1970 00:00:00 GMT" + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "");
+                global.document.cookie = encodeURIComponent(key) + "=; expires=Thu, 01 Jan 1970 00:00:00 GMT" + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "");
             } else {
                 if (typeof value === "object") {
                     value = JSON.stringify(value);
@@ -1300,7 +1302,7 @@
                 } else {
                     expires = neverExpires;
                 }
-                document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value) + expires + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "") + (isSecure ? "; secure" : "");
+                global.document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value) + expires + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "") + (isSecure ? "; secure" : "");
             }
             return true;
         }
@@ -1431,7 +1433,12 @@
         if (userInfoSaved == null) {
             userInfoSaved = cookieGet(enginesis.SESSION_USERINFO);
             if (userInfoSaved != null) {
-                userInfoSaved = JSON.parse(userInfoSaved);
+                try {
+                    userInfoSaved = JSON.parse(userInfoSaved);
+                } catch (exception) {
+                    userInfoSaved = null;
+                    clearUserSessionInfo();
+                }
             }
         }
         if (userInfoSaved != null) {
@@ -1599,7 +1606,7 @@
      * @param object
      */
     function saveObjectWithKey(key, object) {
-        if (key != null && object != null) {
+        if (key != null && object != null && typeof global.localStorage !== "undefined") {
             global.localStorage[key] = JSON.stringify(object);
         }
     }
@@ -1609,7 +1616,7 @@
      * @param key
      */
     function removeObjectWithKey(key) {
-        if (key != null) {
+        if (key != null && typeof global.localStorage !== "undefined") {
             global.localStorage.removeItem(key);
         }
     }
@@ -1623,7 +1630,7 @@
         var jsonData,
             object = null;
 
-        if (typeof global.localStorage !== "undefined" && key != null) {
+        if (key != null && typeof global.localStorage !== "undefined") {
             jsonData = global.localStorage[key];
             if (jsonData != null) {
                 object = JSON.parse(jsonData);
