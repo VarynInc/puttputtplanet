@@ -288,6 +288,7 @@ function processTrackBack () {
  * to the search page to handle the request.
  */
 function processSearchRequest() {
+    global $search;
     $search = getPostOrRequestVar('q', null);
     if ($search != null) {
         header('location:/games/?q=' . $search);

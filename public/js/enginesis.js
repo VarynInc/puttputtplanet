@@ -78,6 +78,7 @@
         nodeRequest: null,
         gameInfo: null,
         favoriteGames: new Set(),
+        favoriteGamesNextCheck: 0,
         supportedNetworks: {
             Enginesis: 1,
             Facebook:  2,
@@ -341,7 +342,11 @@
                 UserLogin: updateLoggedInUserInfo,
                 UserLogout: clearLoggedInUserInfo,
                 GameGet: updateGameInfo,
-                UserFavoriteGamesList: updateFavoriteGames
+                UserFavoriteGamesList: updateFavoriteGames,
+                UserFavoriteGamesAssign: updateFavoriteGames,
+                UserFavoriteGamesAssignList: updateFavoriteGames,
+                UserFavoriteGamesUnassign: updateFavoriteGames,
+                UserFavoriteGamesUnassignList: updateFavoriteGames
             };
             var dispatchFunction = dispatchTable[serviceEndPoint];
             if ( ! isNull(dispatchFunction)) {
@@ -3483,14 +3488,15 @@
      * return an answer right away by looking at the cached list of games. If a call back function is
      * provided, the server will be queried for a updated list of favorite games and the test
      * will be done asynchronously.
-     * @param game_id {integer} A game id to check, or null/0 to check the current game id.
-     * @param callBackFunction {function} If provided, query the server then call this function with the result.
-     * @returns {boolean}
+     * 
+     * @param {integer} game_id A game id to check, or null/0 to check the current game id.
+     * @param {function} callBackFunction If provided, query the server then call this function with the result.
+     * @returns {boolean} True if the requested game_id is a favorite game for this user.
      */
     enginesis.isUserFavoriteGame = function (game_id, callBackFunction) {
-        game_id = game_id || enginesis.gameId;
+        game_id = parseInt(game_id, 10) || enginesis.gameId;
         var isFavorite = enginesis.favoriteGames.has(game_id);
-        if ( ! isNull(callBackFunction) && typeof callBackFunction === "function") {
+        if (typeof callBackFunction === "function" && enginesis.favoriteGamesNextCheck < Date.now()) {
             sendRequest("UserFavoriteGamesList", {}, null)
             .then(function(enginesisResult) {
                 callBackFunction(game_id, enginesis.favoriteGames.has(game_id));
@@ -3505,6 +3511,9 @@
      * @returns {boolean}
      */
     enginesis.userFavoriteGamesList = function (overRideCallBackFunction) {
+        // TODO: wait until timer expires? Or do it now because called wants it now?
+        // if (enginesis.favoriteGamesNextCheck < Date.now()) {
+        enginesis.favoriteGamesNextCheck = Date.now() + 60000;
         return sendRequest("UserFavoriteGamesList", {}, overRideCallBackFunction);
     };
 
