@@ -122,6 +122,10 @@ abstract class EnginesisErrors {
     const USER_BLOCKED = 'USER_BLOCKED';
     const USER_DOES_NOT_EXIST = 'USER_DOES_NOT_EXIST';
     const VALIDATION_FAILED = 'VALIDATION_FAILED';
+
+    static function isError($errorCode) {
+        return $errorCode != EnginesisErrors::NO_ERROR;
+    }
 }
 
 $errorCodeTable = array (

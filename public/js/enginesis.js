@@ -54,10 +54,11 @@
         authTokenWasValidated: false,
         authTokenExpires: null,
         refreshToken: null,
+        refreshTokenExpires: null,
         sessionId: null,
         sessionExpires: null,
         developerKey: null,
-        loggedInUserInfo: null,
+        loggedInUserInfo: {},
         networkId: 1,
         platform: "",
         locale: "en-US",
@@ -128,6 +129,25 @@
             global.setTimeout(restoreOnline, 500);
         }
     };
+
+    /**
+     * Internal logging function. All logging should call this function to abstract and control the interface.
+     * @param message
+     * @param level
+     */
+    function debugLog(message, level) {
+        if (enginesis.debugging) {
+            if (level == null) {
+                level = 15;
+            }
+            if ((enginesis.errorLevel & level) > 0) { // only show this message if the error level is on for the level we are watching
+                console.log(message);
+            }
+            if (level == 9) {
+                alert(message);
+            }
+        }
+    }
 
     /**
      * Review the current state of the enginesis object to make sure we have enough information
@@ -242,6 +262,45 @@
     }
 
     /**
+     * Save an object in local storage given a key.
+     * @param key
+     * @param object
+     */
+    function saveObjectWithKey(key, object) {
+        if (key != null && object != null && typeof global.localStorage !== "undefined") {
+            global.localStorage[key] = JSON.stringify(object);
+        }
+    }
+
+    /**
+     * Delete a local storage key.
+     * @param key
+     */
+    function removeObjectWithKey(key) {
+        if (key != null && typeof global.localStorage !== "undefined") {
+            global.localStorage.removeItem(key);
+        }
+    }
+
+    /**
+     * Restore an object previously saved in local storage.
+     * @param string key A key to look up in local storage.
+     * @returns {object} The data that was saved under key. If key was never previously saved then null is returned.
+     */
+    function loadObjectWithKey(key) {
+        var jsonData,
+            object = null;
+
+        if (key != null && typeof global.localStorage !== "undefined") {
+            jsonData = global.localStorage[key];
+            if (jsonData != null) {
+                object = JSON.parse(jsonData);
+            }
+        }
+        return object;
+    }
+
+    /**
      * Return the status of an enginesis service request.
      * @param {object} enginesisResult Enginesis server result object.
      * @returns {boolean} true if the request succeeded (it may succeed but return no results) or false if the request failed.
@@ -283,7 +342,7 @@
      * Verify we only deal with valid genders. Valid genders are M, F, and U.
      * @param gender {string} any string.
      * @returns {string|*} a single character, one of [M|F|U]
-     * TODO: Consider language code.
+     * @todo: Consider language code.
      */
     function validGender(gender) {
         if (isEmpty(gender)) {
@@ -335,7 +394,7 @@
     function preprocessEnginesisResult(enginesisResult) {
         var serviceEndPoint = enginesisResult.fn;
         if (resultIsSuccess(enginesisResult) && serviceEndPoint) {
-            // TODO: find a better place to define this dispatch table
+            // @todo: find a better place to define this dispatch table
             var dispatchTable = {
                 SessionBegin: updateGameSessionInfo,
                 SessionRefresh: refreshSessionInfo,
@@ -356,12 +415,31 @@
     }
 
     /**
-     * Verify the hash provided in the response matches the response.
+     * Verify the hash provided in the response is valid with the data provided. This is an
+     * attempt to verify the payload was not tampered with to spoof the session.
+     *
      * @param {object} sessionInfo
+     * @return boolean True if we think the session from the server matches the data we have locally.
      */
-    function validateGameSessionHash(sessionInfo) {
+    function sessionVerifyGameHash(sessionInfo) {
+        var isValid = false;
         var cr = sessionInfo.cr || "";
-        // todo:     return enginesis.md5('s=' . $site_id . '&u=' . $user_id . '&d=' . $day_stamp . '&n=' . $user_name . '&t=' . $site_user_id . '&g=' . $game_id . '&k=' . $developer_key);
+        var hash = "";
+        if (cr) {
+            hash = sessionMakeGameHash({
+                siteId: enginesis.siteId,
+                gameId: enginesis.gameId,
+                userId: coerceNotEmpty(enginesis.loggedInUserInfo.user_id, 0),
+                userName: coerceNotEmpty(enginesis.loggedInUserInfo.user_name, ""),
+                siteUserId: coerceNotEmpty(enginesis.loggedInUserInfo.site_user_id, ""),
+                accessLevel: coerceNotEmpty(enginesis.loggedInUserInfo.access_level, 0),
+                siteKey: enginesis.developerKey
+            });
+            isValid = cr == hash;
+        }
+        if ( ! isValid) {
+            debugLog("sessionVerifyGameHash hash does not match. From server: " + cr + ". Computed here: " + hash);
+        }
         return true;
     }
 
@@ -372,21 +450,17 @@
      */
     function refreshSessionInfo(enginesisResult) {
         var refreshSuccessful = false;
-        if (enginesisResult && enginesisResult.results && enginesisResult.results.result.row) {
-            var sessionInfo = enginesisResult.results.result.row;
+        if (enginesisResult && enginesisResult.results && enginesisResult.results.result) {
+            var sessionInfo = enginesisResult.results.result[0];
 
             debugLog(">>>>> enginesis.refreshSessionInfo new session id " + sessionInfo.session_id + " new CR " + sessionInfo.cr);
 
             // verify session hash so that we know the payload was not tampered with
-            if ( ! sessionVerifyCr(sessionInfo.cr)) {
-                // TODO: In this case, we should fail. The hash from the server doesn't match
-                // what we expected computed locally, so it appears someone is trying to impersonate
-                // another user. It could also be that the hash has expired and we just need
-                // to compute a new one.
-                debugLog("updateLoggedInUserInfo hash does not match. From server: " + sessionInfo.cr + ". Computed here: " + sessionMakeHash());
+            if ( ! sessionVerifyHash(sessionInfo.cr, sessionInfo)) {
+                debugLog("refreshSessionInfo hash does not match. From server: " + sessionInfo.cr + ". Computed here: " + sessionMakeHash());
                 refreshSuccessful = false;
             }
-            refreshSuccessful = saveUserSessionInfo(sessionInfo);
+            refreshSuccessful = saveUserSessionInfo(sessionInfo, false);
         } else {
             var errorCode = resultErrorCode(enginesisResult);
             if (errorCode == "INVALID_PARAMETER" || errorCode == "INVALID_TOKEN") {
@@ -432,23 +506,22 @@
      * @param {object} enginesisResult Enginesis server response object
      */
     function updateGameSessionInfo(enginesisResult) {
-        var sessionInfo = enginesisResult.results.result.row;
-        if (validateGameSessionHash(sessionInfo)) {
+        var sessionInfo = enginesisResult.results.result[0];
+        if (sessionVerifyGameHash(sessionInfo)) {
             updateGameInfo(enginesisResult);
-            enginesis.sessionId = sessionInfo.session_id;
-            console.log("enginesis.updateGameSessionInfo session_id is " + enginesis.sessionId);
-            if (sessionInfo.authtok) {
-                enginesis.authToken = sessionInfo.authtok;
-                enginesis.authTokenWasValidated = true;
-            } else if (sessionInfo.site_mark && sessionInfo.site_mark != enginesis.anonymousUser.userId) {
-                enginesis.anonymousUser.userId = sessionInfo.site_mark;
-                anonymousUserSave();
+            if (sessionInfo.authToken || sessionInfo.authtok) {
+                saveUserSessionInfo(sessionInfo, true);
+            } else {
+                enginesis.sessionId = sessionInfo.session_id;
+                enginesis.sessionExpires = Date.now() + (24 * 60 * 60 * 1000); // have it expire in 1 day.    
+                if (sessionInfo.site_mark && sessionInfo.site_mark != enginesis.anonymousUser.userId) {
+                    enginesis.anonymousUser.userId = sessionInfo.site_mark;
+                    anonymousUserSave();
+                }
             }
             if (coerceBoolean(sessionInfo.tokenExpired) && ! isEmpty(enginesis.refreshToken)) {
                 // When the server says the token is expired and we have a refresh token, we can request a fresh auth token.
                 enginesis.sessionRefresh(enginesis.refreshToken, null);
-            } else {
-                saveUserSessionInfo(null);
             }
         }
         enginesis.siteResources.baseURL = sessionInfo.siteBaseUrl || "";
@@ -465,15 +538,17 @@
      * Initialize all user session related data to a known initial state.
      */
     function initializeLocalSessionInfo() {
-        enginesis.loggedInUserInfo = null;
+        enginesis.loggedInUserInfo = {};
 
         // Clear the session and user info
         enginesis.networkId = 1;
         enginesis.sessionId = null;
+        enginesis.sessionExpires = null;
         enginesis.authToken = null;
         enginesis.authTokenWasValidated = false;
         enginesis.authTokenExpires = null;
         enginesis.refreshToken = null;
+        enginesis.refreshTokenExpires = null;
     }
 
     /**
@@ -485,16 +560,12 @@
      */
     function updateLoggedInUserInfo(enginesisResult) {
         var updated = false;
-        if (enginesisResult && enginesisResult.results && enginesisResult.results.result.row) {
-            var userInfo = enginesisResult.results.result.row;
+        if (enginesisResult && enginesisResult.results && enginesisResult.results.result) {
+            var userInfo = enginesisResult.results.result[0];
 
             // verify session hash so that we know the payload was not tampered with
-            if ( ! sessionVerifyCr(userInfo.cr, userInfo)) {
-                // TODO: In this case, we should fail. The hash from the server doesn't match
-                // what we computed locally, so it appears someone is trying to impersonate
-                // another user. It could also be that the hash has expired and we just need
-                // to compute a new one.
-                debugLog("updateLoggedInUserInfo hash does not match. From server: " + userInfo.cr + ". Computed here: " + sessionMakeHash());
+            if ( ! sessionVerifyHash(userInfo.cr, userInfo)) {
+                debugLog("updateLoggedInUserInfo hash does not match. From server: " + userInfo.cr + ". Computed here: " + sessionMakeHash(userInfo));
             }
             // after a log in save the refresh token separately from the session.
             _saveRefreshToken(userInfo.refresh_token);
@@ -502,22 +573,7 @@
             // Move server authorized user data into the local cache
             enginesis.loggedInUserInfo = userInfo;
             enginesis.networkId = userInfo.network_id;
-            updated = saveUserSessionInfo(userInfo);
-
-// This is what we get back from the server call:
-// {"user_id":"10240","site_id":"106","user_name":"Killer","real_name":"Varyn System",
-// "site_user_id":null,"network_id":"1","dob":"1955-08-06","gender":"M","city":"New York, NY",
-// "state":"","zipcode":"","country_code":"US","email_address":"billing@varyn.com","mobile_number":"",
-// "im_id":"","agreement":"1","img_url":"","about_me":"","date_created":"2016-08-07 01:11:06",
-// "date_updated":"2017-03-11 20:42:55","source_site_id":"106","last_login":"2018-09-28 18:27:01",
-// "login_count":"6","tagline":"","additional_info":"","reg_confirmed":"1","user_status_id":"2",
-// "site_currency_value":"20","site_experience_points":"0","view_count":"3","access_level":"10",
-// "user_rank":"10001",
-// "session_id":"0534511005bb686f4caa1c89b54aa4c0",
-// "cr":"9f484790464cc88340d99fd24d5aa8d6",
-// "authtok":"OYTfmLLEBX4\/7RWWq4piX j44uf2Ezv 8SoDTzxuZ7gXkJ1MvHFplU2Ug2mOLTlAPl5h\/PqRqLF JMs7AyxXJ6pFxQfKW0u i2mVWZAwye4IPbPHz0A1UX8t9KfP\/zYn",
-// "refresh_token":"blDRMDfGtQXZSuMMTo4hXbltsEIhS2kqcfvma\/eoBV0QNfUt1YixXucGeJL xX4\/uBCeuYnG0RE7e7zggxzcnS5L5Z4S6pPJKYlXQV1iAPWtA6d7vQH8Rau90eRV\/Gq3",
-// "expires":"2019-03-28 21:27:01"}
+            updated = saveUserSessionInfo(userInfo, false);
         }
         return updated;
     }
@@ -527,7 +583,7 @@
      * @param {object} enginesisResult
      */
     function clearLoggedInUserInfo(enginesisResult) {
-        if (enginesisResult && enginesisResult.results && enginesisResult.results.result.row) {
+        if (enginesisResult && enginesisResult.results && enginesisResult.results.result) {
             initializeLocalSessionInfo();
             clearUserSessionInfo();
         }
@@ -545,10 +601,12 @@
     /**
      * Compute the session hash for the provided session information. If something is missing we will get
      * a default value from the current session, regardless if it is valid or not. It's not really valid
-     * calling this function this way if authTokenWasValidated == false.
+     * calling this function this way if authTokenWasValidated == false. This function matches server-side
+     * sessionMakeHash().
+     *
      * @param {object} userInfo an object containing the key/value pairs identifying a user session, all of which are optional:
      *    siteId, siteKey, dayStamp, userId, userName, siteUserId, accessLevel
-     * @returns {string} The hash for the current session.
+     * @returns {string} The hash for the current user session.
      */
     function sessionMakeHash(userInfo) {
         userInfo = userInfo || {};
@@ -558,17 +616,36 @@
         var userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
         var accessLevel = coerceNotEmpty(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
         var siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
+        var dayStamp = userInfo.dayStamp || sessionDayStamp();
+        var hashClear = "s=" + siteId + "&u=" + userId + "&d=" + dayStamp + "&n=" + userName + "&i=" + siteUserId + "&l=" + accessLevel + "&k=" + enginesis.developerKey;
+        var hash = enginesis.md5(hashClear);
+        debugLog("sessionMakeHash from " + hashClear + " yields " + hash);
+        return hash;
+    }
+
+    /**
+     * Compute the game session hash for the provided session information. If something is missing we will get
+     * a default value from the current session, regardless if it is valid or not. It's not really valid
+     * calling this function this way if authTokenWasValidated == false. This function matches server-side
+     * sessionMakeGameHash().
+     *
+     * @param {object} userInfo an object containing the key/value pairs identifying a user session, all of which are optional:
+     *    siteId, siteKey, dayStamp, userId, userName, siteUserId, accessLevel
+     * @returns {string} The hash for the current game session.
+     */
+    function sessionMakeGameHash(userInfo) {
+        userInfo = userInfo || {};
+        var loggedInUserInfo = enginesis.loggedInUserInfo || {};
+        var siteId = enginesis.siteId;
+        var userId = coerceNotEmpty(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
+        var userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
+        var accessLevel = coerceNotEmpty(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
+        var siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
         var gameId = userInfo.gameId || enginesis.gameId;
-
-        // s=106&u=undefined&d=9079&n=undefined&g=1105&i=&l=undefined&m=0&k=null
-        // TODO: siteKey is null, where is that coming from????
-
         var dayStamp = userInfo.dayStamp || sessionDayStamp();
         var siteMark = 0;
-        if (isNull(siteUserId)) {
-            siteUserId = "";
-        }
-        if (isNull(userId)) {
+
+        if (userId == 0) {
             // Use the site mark only if we do not have a user id
             if (isNull(userInfo.siteMark)) {
                 if (enginesis.anonymousUser) {
@@ -578,7 +655,7 @@
         }
         var hashClear = "s=" + siteId + "&u=" + userId + "&d=" + dayStamp + "&n=" + userName + "&g=" + gameId + "&i=" + siteUserId + "&l=" + accessLevel + "&m=" + siteMark + "&k=" + enginesis.developerKey;
         var hash = enginesis.md5(hashClear);
-        debugLog("sessionMakeHash from " + hashClear + " yields " + hash);
+        debugLog("sessionMakeGameHash from " + hashClear + " yields " + hash);
         return hash;
     }
 
@@ -586,12 +663,16 @@
      * Determine if the session hash computed on the server matches the session hash computed on
      * the client. This helps us determine if the payload was tampered and a hacker is trying
      * to impersonate another user.
-     * @param {string} crFromServer This is the hash computed on the server, usually returned in SessionBegin.
+     * @todo: If the hash from the server doesn't match what we expected computed locally,
+     * it could be someone trying to impersonate another user. It could also be that the hash
+     * has expired and we just need to compute a new one.
+     *
+     * @param {string} hashFromServer This is the hash computed on the server, usually returned in SessionBegin.
      * @param {object|null} userInfo The user information object to validate. If null will validate against prior log in user information.
      * @returns {boolean} true if match, otherwise false.
      */
-    function sessionVerifyCr(crFromServer, userInfo) {
-        return crFromServer == sessionMakeHash(userInfo);
+    function sessionVerifyHash(hashFromServer, userInfo) {
+        return hashFromServer == sessionMakeHash(userInfo);
     }
 
     /**
@@ -687,9 +768,8 @@
     }
 
     function formatHTTPHeader() {
-        // TODO: set "multipart/form" when sending files
+        // @todo: set "multipart/form" when sending files
         var httpHeaders = {
-            "User-Agent": "Enginesis JS client " + enginesis.VERSION,
             "Accept": "application/json",
             "X-DeveloperKey": enginesis.developerKey
         };
@@ -716,7 +796,7 @@
         crossOriginRequest.onerror = function(error) {
             var errorMessage = "CORS request error " + crossOriginRequest.status + " " + error.toString();
 
-            // TODO: If the error is no network, then set offline and queue this request
+            // @todo: If the error is no network, then set offline and queue this request
 
             if (setOffline()) {
                 errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
@@ -838,7 +918,7 @@
                         }
                     }, function (error) {
 
-                        // TODO: If the error is no network, then set offline and queue this request
+                        // @todo: If the error is no network, then set offline and queue this request
 
                         if (setOffline()) {
                             errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
@@ -855,7 +935,7 @@
                     })
                     .catch(function (error) {
 
-                        // TODO: If the error is no network, then set offline and queue this request
+                        // @todo: If the error is no network, then set offline and queue this request
 
                         if (setOffline()) {
                             errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
@@ -952,6 +1032,9 @@
         };
         if (enginesis.loggedInUserInfo && enginesis.authTokenWasValidated && Math.floor(enginesis.loggedInUserInfo.user_id) != 0) {
             serverParams.authtok = enginesis.authToken;
+            if (serviceName == "SessionRefresh") {
+                serverParams.logged_in_user_id = enginesis.loggedInUserInfo.user_id;
+            }
         }
         if (enginesis.gameId) {
             serverParams.game_id = enginesis.gameId;
@@ -1068,7 +1151,7 @@
         function processNextIfQueueNotEmpty(resolve) {
             if (enginesis.isOnline && enginesis.serviceQueue.length > 0) {
                 if (wasOffline) {
-                    // TODO: we were offline but now we are back online, should we generate an event to alert the app?
+                    // @todo: we were offline but now we are back online, should we generate an event to alert the app?
                     wasOffline = false;
                 }
                 processNextMessage(function() {
@@ -1078,7 +1161,7 @@
                 });
             } else {
                 if (wasOffline) {
-                    // TODO: we were offline and we're still offline.
+                    // @todo: we were offline and we're still offline.
                 }
                 resolve();
             }
@@ -1116,7 +1199,7 @@
      */
     function qualifyAndSetServerStage (newServerStage) {
         var regMatch;
-        var currentHost = enginesis.isBrowserBuild ? global.location.host : ""; // TODO: How to get host in NodeJS?
+        var currentHost = enginesis.isBrowserBuild ? global.location.host : ""; // @todo: How to get host in NodeJS?
         var isLocalhost = false;
         enginesis.serverHost = null;
 
@@ -1167,10 +1250,16 @@
             var service = "enginesis";
             var domainParts = currentHost.split(".");
             var numberOfParts = domainParts.length;
+            var host;
+
             if (numberOfParts > 1) {
-                enginesis.serverHost = service
-                    + "."
-                    + domainParts[numberOfParts - 2].replace(/-[ldqx]$/, "")
+                host = domainParts[numberOfParts - 2].replace(/-[ldqx]$/, "");
+                if (host != service) {
+                    enginesis.serverHost = service + ".";
+                } else {
+                    enginesis.serverHost = "";
+                }
+                enginesis.serverHost += host
                     + enginesis.serverStage
                     + "." + domainParts[numberOfParts - 1];
             } else if (isLocalhost) {
@@ -1270,7 +1359,7 @@
      *   max age, in seconds. String indicates GMT date. Date is converted to GMT date.
      * @param path {string} Cookie URL path.
      * @param domain {string} Cookie domain.
-     * @param isSecure {boolean} Set cookie secure flag.
+     * @param isSecure {boolean} Set cookie secure flag. Default is true.
      * @return {boolean} true if set, false if error.
      */
     function cookieSet (key, value, expiration, path, domain, isSecure) {
@@ -1279,6 +1368,9 @@
 
         if (typeof global.document === "undefined") {
             return false;
+        }
+        if (typeof isSecure === "undefined") {
+            isSecure = true;
         }
         if ( ! key || /^(?:expires|max\-age|path|domain|secure)$/i.test(key)) {
             return false;
@@ -1307,7 +1399,7 @@
                 } else {
                     expires = neverExpires;
                 }
-                global.document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value) + expires + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "") + (isSecure ? "; secure" : "");
+                global.document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value) + expires + (domain ? "; SameSite=Strict; domain=" + domain : "") + (path ? "; path=" + path : "") + (isSecure ? "; Secure" : "");
             }
             return true;
         }
@@ -1325,36 +1417,51 @@
      */
     function restoreUserFromAuthToken (authToken) {
         var queryParameters;
-        var userInfo;
         var wasRestored = false;
+        var loggedInUserInfo = null;
 
         if (isEmpty(authToken)) {
-            queryParameters = queryStringToObject();
-            if (queryParameters.authtok !== undefined) {
-                authToken = queryParameters.authtok;
-                debugLog("restoreUserFromAuthToken from query: " + authToken);
-            }
+            // if a token was not provided, try to find it in a cache in the following order:
+            // 1. from server-supplied cookie
+            // 2. from query string parameter
+            // 3. in local storage from prior session
+            authToken = cookieGet(enginesis.SESSION_COOKIE);
+            debugLog("restoreUserFromAuthToken from cookie: " + authToken);
             if (isEmpty(authToken)) {
-                authToken = cookieGet(enginesis.SESSION_COOKIE);
-                debugLog("restoreUserFromAuthToken from cookie: " + authToken);
+                queryParameters = queryStringToObject();
+                if (queryParameters.authtok !== undefined) {
+                    authToken = queryParameters.authtok;
+                    debugLog("restoreUserFromAuthToken from query: " + authToken);
+                }
+                if (isEmpty(authToken)) {
+                    loggedInUserInfo = loadObjectWithKey(enginesis.SESSION_USERINFO);
+                    if (loggedInUserInfo != null && loggedInUserInfo.authToken) {
+                        authToken = loggedInUserInfo.authToken;
+                        debugLog("restoreUserFromAuthToken from prior session: " + authToken);
+                    }
+                }
             }
         } else {
             debugLog("restoreUserFromAuthToken from parameter: " + authToken);
         }
         if ( ! isEmpty(authToken)) {
-            // TODO: Validate the token (for now we are accepting that it is valid but we should check!) If the authToken is valid then we can trust the userInfo
-            // TODO: we can use cr to validate the token was not changed
-            userInfo = cookieGet(enginesis.SESSION_USERINFO);
-            if ( ! isEmpty(userInfo)) {
-                debugLog("restoreUserFromAuthToken user info: " + userInfo);
-                userInfo = JSON.parse(userInfo);
-                if (userInfo != null) {
-                    enginesis.authToken = authToken;
-                    enginesis.authTokenWasValidated = true;
-                    enginesis.loggedInUserInfo = userInfo;
-                    enginesis.networkId = Math.floor(userInfo.network_id);
-                    wasRestored = true;
+            // @todo: Validate the token (for now we are accepting that it is valid but we should check!) If the authToken is valid then we can trust the userInfo
+            // @todo: we can use cr to validate the token was not changed
+            if (loggedInUserInfo == null) {
+                loggedInUserInfo = JSON.parse(cookieGet(enginesis.SESSION_USERINFO));
+                debugLog("restoreUserFromAuthToken user info from session cookie: " + loggedInUserInfo);
+                if (loggedInUserInfo == null) {
+                    loggedInUserInfo = loadObjectWithKey(enginesis.SESSION_USERINFO);
+                    debugLog("restoreUserFromAuthToken user info from local storage: " + loggedInUserInfo);
                 }
+            }
+            if (loggedInUserInfo != null) {
+                enginesis.authToken = authToken;
+                enginesis.authTokenExpires = null; // @todo: Need to get the expiry of this token.
+                enginesis.authTokenWasValidated = true; // @todo: we should verify this payload is valid.
+                enginesis.loggedInUserInfo = loggedInUserInfo;
+                enginesis.networkId = Math.floor(loggedInUserInfo.network_id);
+                wasRestored = true;
                 debugLog("restoreUserFromAuthToken valid user: " + enginesis.loggedInUserInfo.user_name + "(" + enginesis.loggedInUserInfo.user_id + ")");
             } else {
                 // if we have an authtoken but we did not cache the user info, then
@@ -1384,26 +1491,42 @@
      * @param {Object|null} sessionInfo the parameters that define the user session, otherwise saves
      *   what is already set on the current session.
      *   sessionInfo.expires is a UTC date when this info should expire.
+     * @param boolean fromGameSession True if sessionInfo was derived from a game session (SessionBegin), false if it is from a user session (UserLogin)
      * @returns {boolean} true if the save was successful, otherwise false.
      */
-    function saveUserSessionInfo(sessionInfo) {
+    function saveUserSessionInfo(sessionInfo, fromGameSession) {
         var haveValidSession;
         if (sessionInfo) {
+            if (fromGameSession) {
+                haveValidSession = sessionVerifyGameHash(sessionInfo);
+            } else {
+                haveValidSession = sessionVerifyHash(sessionInfo.cr, enginesis.loggedInUserInfo);
+            }
+            if ( ! haveValidSession) {
+                var hash;
+                if (fromGameSession) {
+                    hash = sessionMakeGameHash(enginesis.loggedInUserInfo);
+                } else {
+                    hash = sessionMakeHash(enginesis.loggedInUserInfo);
+                }
+                debugLog("Possible payload compromise: provided hash " + sessionInfo.cr + " does not match computer here " + hash);
+                // @todo: What action to take if hash does not agree?
+                haveValidSession = false;
+            }
             haveValidSession = true;
             enginesis.sessionId = sessionInfo.session_id;
-            enginesis.sessionExpires = new Date(sessionInfo.session_expires);
-            enginesis.authToken = sessionInfo.authtok;
-            enginesis.authTokenExpires = new Date(sessionInfo.expires);
-            enginesis.refreshToken = sessionInfo.refresh_token;
+            enginesis.sessionExpires = Date.now() + (24 * 60 * 60 * 1000); // have it expire in 1 day.
+            enginesis.authToken = sessionInfo.authToken || sessionInfo.authtok;
+            // enginesis.authTokenExpires = new Date(sessionInfo.expires);
+            enginesis.loggedInUserInfo.authToken = enginesis.authToken;
+            enginesis.loggedInUserInfo.authTokenExpires = sessionInfo.expires;
             enginesis.authTokenWasValidated = true;
-            var hash = sessionMakeHash();
-            var cr = enginesis.loggedInUserInfo.cr;
-            // TODO: verify hashes agree?
-            // if (sessionInfo.cr != hash) {
-                // when hash does not agree what do we do? Log out user and clear session?
-            // }
+            if (sessionInfo.refresh_token) {
+                enginesis.refreshToken = sessionInfo.refresh_token;
+                enginesis.refreshTokenExpires = new Date(sessionInfo.expires);
+            }
             saveObjectWithKey(enginesis.SESSION_USERINFO, enginesis.loggedInUserInfo);
-            debugLog("enginesis.saveUserSessionInfo session id is " + enginesis.sessionId + " session.cr= " + sessionInfo.cr + "; loggedInUserInfo.cr=" + cr + "; sessionMakeHash=" + hash);
+            debugLog("enginesis.saveUserSessionInfo session id is " + enginesis.sessionId + " session.cr= " + sessionInfo.cr);
         } else {
             haveValidSession = false;
         }
@@ -1455,8 +1578,8 @@
                 accessLevel: userInfoSaved.accessLevel,
                 siteKey: enginesis.developerKey
             });
-            // TODO: verify hash to verify the payload was not tampered.
-            // TODO: verify session, authtok, but if expired try to refresh the session.
+            // @todo: verify hash to verify the payload was not tampered.
+            // @todo: verify session, authtok, but if expired try to refresh the session.
             if (hash != userInfoSaved.cr) {
                 debugLog("restoreUserSessionInfo hash does not match. From server: " + userInfoSaved.cr + ". Computed here: " + hash);
             }
@@ -1466,7 +1589,9 @@
             enginesis.sessionExpires = new Date(userInfoSaved.sessionExpires);
             enginesis.authToken = userInfoSaved.authToken;
             enginesis.authTokenExpires = new Date(userInfoSaved.authTokenExpires);
+            enginesis.authTokenWasValidated = true; // @todo: We should actually validate it (check expired, check hash, verify user_id matches)
             enginesis.refreshToken = userInfoSaved.refreshToken;
+            enginesis.refreshTokenExpires = null; // new Date(userInfoSaved.refreshTokenExpires); At this time refresh token expiration is not here.
             debugLog("enginesis.restoreUserSessionInfo " + enginesis.sessionId + " from " + JSON.stringify(userInfoSaved));
         } else if (enginesis.isUserLoggedIn()) {
             // if a user was not cached and we trust the authtok then we need to load this user
@@ -1501,7 +1626,7 @@
             var loggedInUserInfo = enginesis.loggedInUserInfo;
             var userInfoSaved = loadObjectWithKey(enginesis.SESSION_COOKIE);
             if (userInfoSaved != null) {
-                if (userInfoSaved.sessionExpires === undefined || userInfoSaved.sessionExpires == 0) {
+                if ( ! userInfoSaved.sessionExpires) {
                     // if we don't get a session expire date then just assume it expired.
                     sessionExpireTime = new Date();
                 } else {
@@ -1584,64 +1709,6 @@
      */
     function _clearRefreshToken() {
         removeObjectWithKey(enginesis.refreshTokenStorageKey);
-    }
-
-    /**
-     * Internal logging function. All logging should call this function to abstract and control the interface.
-     * @param message
-     * @param level
-     */
-    function debugLog(message, level) {
-        if (enginesis.debugging) {
-            if (level == null) {
-                level = 15;
-            }
-            if ((enginesis.errorLevel & level) > 0) { // only show this message if the error level is on for the level we are watching
-                console.log(message);
-            }
-            if (level == 9) {
-                alert(message);
-            }
-        }
-    }
-
-    /**
-     * Save an object in local storage given a key.
-     * @param key
-     * @param object
-     */
-    function saveObjectWithKey(key, object) {
-        if (key != null && object != null && typeof global.localStorage !== "undefined") {
-            global.localStorage[key] = JSON.stringify(object);
-        }
-    }
-
-    /**
-     * Delete a local storage key.
-     * @param key
-     */
-    function removeObjectWithKey(key) {
-        if (key != null && typeof global.localStorage !== "undefined") {
-            global.localStorage.removeItem(key);
-        }
-    }
-
-    /**
-     * Restore an object previously saved in local storage
-     * @param key
-     * @returns {object}
-     */
-    function loadObjectWithKey(key) {
-        var jsonData,
-            object = null;
-
-        if (key != null && typeof global.localStorage !== "undefined") {
-            jsonData = global.localStorage[key];
-            if (jsonData != null) {
-                object = JSON.parse(jsonData);
-            }
-        }
-        return object;
     }
 
     /**
@@ -2290,16 +2357,28 @@
      */
     enginesis.toError = function(enginesisResult) {
         var error = null;
-        var errorMessage;
-        if (enginesisResult && enginesisResult.results && enginesisResult.results.status) {
-            if (enginesisResult.results.status.extended_info) {
-                errorMessage = enginesisResult.results.status.extended_info;
-            } else {
-                errorMessage = enginesisResult.results.status.message;
+        var enginesisStatus = null;
+        var errorMessage = "";
+        if (enginesisResult) {
+            if (enginesisResult.status) {
+                enginesisStatus = enginesisResult.status;
+            } else if (enginesisResult.results && enginesisResult.results.status) {
+                enginesisStatus = enginesisResult.results.status;
             }
-            error = new Error(errorMessage);
-            error.code = enginesisResult.results.status.message;
         }
+        if (enginesisStatus == null) {
+            enginesisStatus = {
+                message: "INVALID_PARAMETER",
+                extended_info: "Result was not a valid result object."
+            };
+        }
+        if (enginesisStatus.extended_info) {
+            errorMessage = enginesisStatus.extended_info;
+        } else {
+            errorMessage = enginesisStatus.message;
+        }
+        error = new Error(errorMessage);
+        error.code = enginesisStatus.message;
         return error;
     };
 
@@ -2430,7 +2509,7 @@
      * @returns {boolean}
      */
     enginesis.isValidUserName = function (userName) {
-        // TODO: reuse the regex we used on enginesis or varyn
+        // @todo: reuse the regex we used on enginesis or varyn
         return userName.length > 2;
     };
 
@@ -2440,8 +2519,8 @@
      * @returns {boolean}
      */
     enginesis.isValidPassword = function (password) {
-        // TODO: reuse the regex we use on enginesis or varyn
-        // TODO: consider making this a server request and doing the mode complex check (not a compromised password)
+        // @todo: reuse the regex we use on enginesis or varyn
+        // @todo: consider making this a server request and doing the mode complex check (not a compromised password)
         return password.length > 7;
     };
 
@@ -2533,8 +2612,8 @@
                 terms: urlBase + siteResources.termsURL
             };
         } else {
-            // TODO: if SessionBegin was not called we won't have this information. We need an alternative in this scenario. Maybe force a call to SessionBegin?
-            // TODO: using varyn.com as the default makes no sense here.
+            // @todo: if SessionBegin was not called we won't have this information. We need an alternative in this scenario. Maybe force a call to SessionBegin?
+            // @todo: using varyn.com as the default makes no sense here.
             urlBase = getProtocol() + "varyn" + enginesis.serverStage + ".com";
             return {
                 root: urlBase,
@@ -2614,7 +2693,7 @@
      *    height {int} optional height, use null to ignore. Server will choose common height.
      *    format {string} optional image format, use null and server will choose. Otherwise {jpg|png|svg}
      * @returns {string} a URL you can use to load the image.
-     * TODO: this really needs to call a server-side service to perform this resolution as we need to use PHP to determine which files are available and the closest match.
+     * @todo: this really needs to call a server-side service to perform this resolution as we need to use PHP to determine which files are available and the closest match.
      */
     enginesis.getGameImageURL = function (parameters) {
         var gameName = null,
@@ -2983,8 +3062,8 @@
         return sendRequest("GameListListGamesByName", {game_list_name: gameListName}, overRideCallBackFunction);
     };
 
-    enginesis.gameListByMostPopular = function (startDate, endDate, startItem, numItems, overRideCallBackFunction) {
-        return sendRequest("GameListByMostPopular", {start_date: startDate, end_date: endDate, start_item: startItem, num_items: numItems}, overRideCallBackFunction);
+    enginesis.gameListByMostPopular = function (startDate, endDate, startItem, numberOfItems, overRideCallBackFunction) {
+        return sendRequest("GameListByMostPopular", {start_date: startDate, end_date: endDate, start_item: startItem, num_items: numberOfItems}, overRideCallBackFunction);
     };
 
     /**
@@ -3006,8 +3085,8 @@
         return sendRequest("GameListListRecommendedGames", {game_list_id: gameListId}, overRideCallBackFunction);
     };
 
-    enginesis.gamePlayEventListByMostPlayed = function (startDate, endDate, numItems, overRideCallBackFunction) {
-        return sendRequest("GamePlayEventListByMostPlayed", {start_date: startDate, end_date: endDate, num_items: numItems}, overRideCallBackFunction);
+    enginesis.gamePlayEventListByMostPlayed = function (startDate, endDate, numberOfItems, overRideCallBackFunction) {
+        return sendRequest("GamePlayEventListByMostPlayed", {start_date: startDate, end_date: endDate, num_items: numberOfItems}, overRideCallBackFunction);
     };
 
     enginesis.gameRatingGet = function (gameId, overRideCallBackFunction) {
@@ -3024,7 +3103,7 @@
 
     enginesis.scoreSubmitUnauth = function (gameId, userName, score, gameData, timePlayed, userSource, overRideCallBackFunction) {
         var sessionId = enginesis.sessionId;
-        // TODO: userName = enginesis.anonymousUser.userName, site_mark = enginesis.anonymousUser.userId;
+        // @todo: userName = enginesis.anonymousUser.userName, site_mark = enginesis.anonymousUser.userId;
         return sendRequest("ScoreSubmitUnauth", {game_id: gameId, session_id: sessionId, user_name: userName, score: score, game_data: gameData, time_played: timePlayed, user_source: userSource}, overRideCallBackFunction);
     };
 
@@ -3084,7 +3163,7 @@
     // ScoreSubmitRankGet
     // ScoreSubmitRankList
 
-    enginesis.scoreRankList = function(gameId, timePeriodType, timePeriod, firstRank, numRanks, overRideCallBackFunction) {
+    enginesis.scoreRankList = function(gameId, timePeriodType, timePeriod, startRank, numberOfRanks, overRideCallBackFunction) {
         var service = "ScoreRankList";
         var errorCode = "";
         if (isEmpty(gameId)) {
@@ -3099,18 +3178,18 @@
         if (isEmpty(timePeriod)) {
             timePeriod = 0;
         }
-        if (isEmpty(firstRank)) {
-            firstRank = 1;
+        if (isEmpty(startRank)) {
+            startRank = 1;
         }
-        if (isEmpty(numRanks)) {
-            numRanks = 100;
+        if (isEmpty(numberOfRanks)) {
+            numberOfRanks = 100;
         }
         var parameters = {
             game_id: gameId,
             time_period_type: timePeriodType,
             time_period: timePeriod,
-            first_rank: firstRank,
-            num_ranks: numRanks
+            start_rank: startRank,
+            num_ranks: numberOfRanks
         };
         return sendRequest(service, parameters, overRideCallBackFunction);
     };
@@ -3256,7 +3335,7 @@
         }, overRideCallBackFunction);
     };
 
-        // TODO: SHould include the user-id?
+        // @todo: Should include the user-id?
     enginesis.registeredUserPasswordChange = function (captcha_id, captcha_response, password, secondary_password, overRideCallBackFunction) {
         return sendRequest("RegisteredUserPasswordChange", {
             site_id: siteId,
@@ -3279,25 +3358,25 @@
         return sendRequest("RegisteredUserGet", {get_user_id: userId, site_user_id: siteUserId, network_id: networkId}, overRideCallBackFunction);
     };
 
-    enginesis.siteListGames = function(startItem, numItems, gameStatusId, overRideCallBackFunction) {
+    enginesis.siteListGames = function(startItem, numberOfItems, gameStatusId, overRideCallBackFunction) {
         // return a list of all assets assigned to the site in title order
         if (startItem == null || startItem < 0) {
             startItem = 1;
         }
-        if (numItems == null || numItems > 500) {
-            numItems = 500;
+        if (numberOfItems == null || numberOfItems > 500) {
+            numberOfItems = 500;
         }
         if (gameStatusId == null || gameStatusId > 3) {
             gameStatusId = 2;
         }
-        return sendRequest("SiteListGames", {start_item: startItem, num_items: numItems, game_status_id: gameStatusId}, overRideCallBackFunction);
+        return sendRequest("SiteListGames", {start_item: startItem, num_items: numberOfItems, game_status_id: gameStatusId}, overRideCallBackFunction);
     };
 
-    enginesis.siteListGamesRandom = function(numItems, overRideCallBackFunction) {
-        if (numItems == null || numItems > 500) {
-            numItems = 500;
+    enginesis.siteListGamesRandom = function(numberOfItems, overRideCallBackFunction) {
+        if (numberOfItems == null || numberOfItems > 500) {
+            numberOfItems = 500;
         }
-        return sendRequest("SiteListGamesRandom", {num_items: numItems}, overRideCallBackFunction);
+        return sendRequest("SiteListGamesRandom", {num_items: numberOfItems}, overRideCallBackFunction);
     };
 
     enginesis.userGetByName = function (userName, overRideCallBackFunction) {
@@ -3409,7 +3488,7 @@
         if (userId == 0) {
             userId = enginesis.loggedInUserInfo ? enginesis.loggedInUserInfo.user_id : 0;
         }
-        // TODO: Size is determined by site_data, sites could have different sizes
+        // @todo: Size is determined by site_data, sites could have different sizes
         if (size < 0) {
             size = 0;
         } else if (size > 2) {
@@ -3511,7 +3590,7 @@
      * @returns {boolean}
      */
     enginesis.userFavoriteGamesList = function (overRideCallBackFunction) {
-        // TODO: wait until timer expires? Or do it now because called wants it now?
+        // @todo: wait until timer expires? Or do it now because called wants it now?
         // if (enginesis.favoriteGamesNextCheck < Date.now()) {
         enginesis.favoriteGamesNextCheck = Date.now() + 60000;
         return sendRequest("UserFavoriteGamesList", {}, overRideCallBackFunction);
