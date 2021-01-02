@@ -6,7 +6,7 @@
  * Not intended for UI consumption. Instead, use the string table and localized language to
  * map the error code into a UI string.
  *
- * Date generated: 25-Jul-2020 10:02:55 PM
+ * Date generated: 26-Dec-2020 09:33:40 PM
  */
 
 abstract class EnginesisErrors {
@@ -117,6 +117,7 @@ abstract class EnginesisErrors {
     const SYSTEM_ERROR = 'SYSTEM_ERROR';
     const TOKEN_EXPIRED = 'TOKEN_EXPIRED';
     const TOO_MANY_ITEMS = 'TOO_MANY_ITEMS';
+    const UNDEFINED_KEY = 'UNDEFINED_KEY';
     const UNKNOWN_SERVICE = 'UNKNOWN_SERVICE';
     const UPDATED = 'UPDATED';
     const USER_BLOCKED = 'USER_BLOCKED';
@@ -128,7 +129,7 @@ abstract class EnginesisErrors {
     }
 }
 
-$errorCodeTable = array (
+$errorCodeTable = [
     EnginesisErrors::ALREADY_ASSIGNED => 'The object was previously assigned to this user.',
     EnginesisErrors::ALREADY_CONFIRMED => 'This user previously confirmed registration.',
     EnginesisErrors::ALREADY_GIFTED => 'This user already has that gift.',
@@ -187,7 +188,7 @@ $errorCodeTable = array (
     EnginesisErrors::INVALID_LOGIN => 'The login credentials provided did not match.',
     EnginesisErrors::INVALID_MESSAGE => 'The message content provided was not valid.',
     EnginesisErrors::INVALID_NAME => 'The name specified cannot be used to identify this type of object.',
-    EnginesisErrors::INVALID_PARAMETER => 'One or more parameters provided we not of the expected format.',
+    EnginesisErrors::INVALID_PARAMETER => 'One or more parameters provided are not the expected format.',
     EnginesisErrors::INVALID_PASSWORD => 'The login credentials provided did not match.',
     EnginesisErrors::INVALID_QUIZ_CHOICE_ID => 'The quiz choice selected is not valid.',
     EnginesisErrors::INVALID_QUIZ_QUESTION_ID => 'The quiz question selected is not valid.',
@@ -235,12 +236,13 @@ $errorCodeTable = array (
     EnginesisErrors::SYSTEM_ERROR => 'There was a system error processing your request. Information has been sent to support to remedy the problem.',
     EnginesisErrors::TOKEN_EXPIRED => 'The token you are trying to use is either invalid or it has past its expiration date.',
     EnginesisErrors::TOO_MANY_ITEMS => 'There are too many items in the list, or the list is an unrecognized format.',
+    EnginesisErrors::UNDEFINED_KEY => 'The key does not exist. Keys must be defined before they can be assigned a value.',
     EnginesisErrors::UNKNOWN_SERVICE => 'The service requested is not defined.',
     EnginesisErrors::UPDATED => 'Previous score exists but this score is better.',
     EnginesisErrors::USER_BLOCKED => 'The user is blocked from using the system.',
     EnginesisErrors::USER_DOES_NOT_EXIST => 'The information provided does not identify a user in this site context.',
     EnginesisErrors::VALIDATION_FAILED => 'Validation failed.',
-);
+];
 
 /**
  * @param $status_msg

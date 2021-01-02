@@ -1,5 +1,6 @@
-/** @file: enginesis.js - JavaScript interface for Enginesis SDK
- * @author: jf
+/**
+ * @module: enginesis - JavaScript interface for Enginesis SDK
+ * @author: jf, Varyn, Inc.
  * @date: 7/25/13
  * @summary: A JavaScript interface to the Enginesis API. This is designed to be a singleton
  *  object, only one should ever exist. It represents the data model and service/event model
@@ -11,24 +12,15 @@
 "use strict";
 
 /**
- * Construct the singleton Enginesis object with initial parameters.
- * @param parameters object {
- *      siteId: number, required,
- *      developerKey: string, required,
- *      authToken: string, optional,
- *      gameId: number | 0, optional,
- *      gameGroupId: number | 0, optional,
- *      languageCode: string, optional,
- *      serverStage: string, optional, default to live server,
- *      callBackFunction: function, optional but highly recommended.
- *      }
- * @returns {object}
+ * Construct the singleton Enginesis object with initial parameters. Call `init` before any other function.
+ * * @returns {object} Enginesis object to perform operations on.
  */
 (function enginesis (global) {
     "use strict";
 
+    /** @exports enginesis */
     var enginesis = {
-        VERSION: "2.6.2",
+        VERSION: "2.6.6",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -40,6 +32,7 @@
         siteResources: {
             serviceURL: null,
             avatarImageURL: null,
+            assetUploadURL: null
         },
         siteId: 0,
         gameId: 0,
@@ -76,6 +69,7 @@
         serviceQueue: [],
         serviceQueueSaveKey: "enginesisServiceQueue",
         serviceQueueRestored: 0,
+        assetUploadQueue: null,
         nodeRequest: null,
         gameInfo: null,
         favoriteGames: new Set(),
@@ -92,19 +86,20 @@
     /**
      * Since this is a singleton object this init function is required before any method can
      * be called. This sets up the initial state of the Enginesis services.
-     * @param parameters {object} with the following properties:
-     *    .siteId {integer} required parameter the Enginesis site id.
-     *    .developerKey {string} required parameter the developer API secret key.
-     *    .gameId {integer} optional parameter indicates which game id this game represents.
-     *    .gameGroupId {integer} optional parameter indicates which game group the game belongs to.
-     *    .languageCode {string} optional parameter to indicate which language the client requests
+     * @param {object} parameters Configuration object with the following properties:
+     *  * `siteId` {integer} required parameter the Enginesis site id.
+     *  * `developerKey` {string} required parameter the developer API secret key.
+     *  * `gameId` {integer} optional parameter indicates which game id this game represents.
+     *  * `gameGroupId` {integer} optional parameter indicates which game group the game belongs to.
+     *  * `languageCode` {string} optional parameter to indicate which language the client requests
      *        Enginesis responses.
-     *    .serverStage {string} which Enginesis server to contact, one of ["", "-d", "-q", "-l", "-x", "*"]. Default
+     *  * `serverStage` {string} which Enginesis server to contact, one of ["", "-d", "-q", "-l", "-x", "*"]. Default
      *        is "*" which indicates to match the stage this client is currently running on.
-     *    .authToken {string} optional parameter to provide a user authentication token. When not provided
+     *  * `authToken` {string} optional parameter to provide a user authentication token. When not provided
      *        Enginesis will attempt to load it from URL query string (?token=) or cookie.
-     *    .callBackFunction {function} optional parameter function to call upon a completed request.
+     *  * `callBackFunction` {function} optional parameter function to call upon a completed request.
      *        See documentation for Enginesis response object structure.
+     * @returns {boolean} True if the Enginesis object is considered in a valid operational state and server transactions may proceed, otherwise _false_ and further initialization is required.
      */
     enginesis.init = function(parameters) {
         var authToken = null;
@@ -128,19 +123,21 @@
             // defer the queue processing
             global.setTimeout(restoreOnline, 500);
         }
+        return validOperationalState();
     };
 
     /**
      * Internal logging function. All logging should call this function to abstract and control the interface.
-     * @param message
-     * @param level
+     * @param {string} message A message to show in the log.
+     * @param {integer} level Message is sent to log only if this level is turned on.
      */
     function debugLog(message, level) {
         if (enginesis.debugging) {
             if (level == null) {
                 level = 15;
             }
-            if ((enginesis.errorLevel & level) > 0) { // only show this message if the error level is on for the level we are watching
+            if ((enginesis.errorLevel & level) > 0) {
+                // only show this message if the error level is on for the level we are watching
                 console.log(message);
             }
             if (level == 9) {
@@ -191,7 +188,7 @@
      * Coerce a value to its boolean equivelent, causing the value to be interpreted as its
      * boolean intention. This works very different that the JavaScript coercion. For example,
      * "0" == true and "false" == true in JavaScript but here "0" == false and "false" == false.
-     * @param {*} value A value to test.
+     * @param {any} value A value to test.
      * @returns {boolean} `true` if `value` is considered a coercible true value.
      */
     function coerceBoolean (value) {
@@ -263,8 +260,8 @@
 
     /**
      * Save an object in local storage given a key.
-     * @param key
-     * @param object
+     * @param {string} key Key to identify object. If this key exists it will be overwritted with `object`.
+     * @param {object} object Value to save under key.
      */
     function saveObjectWithKey(key, object) {
         if (key != null && object != null && typeof global.localStorage !== "undefined") {
@@ -274,7 +271,7 @@
 
     /**
      * Delete a local storage key.
-     * @param key
+     * @param {string} key Key to identify object.
      */
     function removeObjectWithKey(key) {
         if (key != null && typeof global.localStorage !== "undefined") {
@@ -284,7 +281,7 @@
 
     /**
      * Restore an object previously saved in local storage.
-     * @param string key A key to look up in local storage.
+     * @param {string} key A key to look up in local storage.
      * @returns {object} The data that was saved under key. If key was never previously saved then null is returned.
      */
     function loadObjectWithKey(key) {
@@ -339,9 +336,28 @@
     }
 
     /**
+     * Generate a standard Enginesis error response for situations where we identified an error condition
+     * internally in the SDK and want to reply with a standard response. Complement to PHP function makeErrorResponse().
+     * @param {string} errorCode EnginesisErrors error code.
+     * @param {string} errorMessage Extended error information.
+     * @param {Object|Array} passthruParameters Key/value parameters to include in passthru
+     */
+    function makeErrorResponse(errorCode, errorMessage, passthruParameters) {
+        return {
+            results: [],
+            status: {
+                success: 0,
+                message: errorCode,
+                extended_info: errorMessage
+            },
+            passthru: passthruParameters
+        };
+    }
+
+    /**
      * Verify we only deal with valid genders. Valid genders are M, F, and U.
-     * @param gender {string} any string.
-     * @returns {string|*} a single character, one of [M|F|U]
+     * @param {string} gender A string identifying gender, one of [M|Male|F|Female]. Anything else is considerend "Unidentified."
+     * @returns {string} a single character, one of [M|F|U]
      * @todo: Consider language code.
      */
     function validGender(gender) {
@@ -363,9 +379,9 @@
     /**
      * Internal function to handle completed service request and convert the JSON response to
      * an object and then invoke the call back function.
-     * @param stateSequenceNumber {Number} The state identifier corresponding to this transaction.
-     * @param enginesisResponseData {EnginesisResponse} The Enginesis response object.
-     * @param overRideCallBackFunction {Function} Optional function to call when complete.
+     * @param {Number} stateSequenceNumber The state identifier corresponding to this transaction.
+     * @param {EnginesisResponse} enginesisResponseData The Enginesis response object.
+     * @param {Function} overRideCallBackFunction Optional function to call when complete.
      */
     function requestCompleteXMLHTTP (stateSequenceNumber, enginesisResponseData, overRideCallBackFunction) {
         var enginesisResponseObject;
@@ -419,7 +435,7 @@
      * attempt to verify the payload was not tampered with to spoof the session.
      *
      * @param {object} sessionInfo
-     * @return boolean True if we think the session from the server matches the data we have locally.
+     * @return {boolean} True if we think the session from the server matches the data we have locally.
      */
     function sessionVerifyGameHash(sessionInfo) {
         var isValid = false;
@@ -447,6 +463,7 @@
      * This is the callback from a request to refresh the Enginesis login when the auth token
      * expires. This response is similar to the initial login response. Called from `sessionRefresh`.
      * @param {object} enginesisResult Enginesis result object.
+     * @returns {boolean} True if successful.
      */
     function refreshSessionInfo(enginesisResult) {
         var refreshSuccessful = false;
@@ -513,7 +530,7 @@
                 saveUserSessionInfo(sessionInfo, true);
             } else {
                 enginesis.sessionId = sessionInfo.session_id;
-                enginesis.sessionExpires = Date.now() + (24 * 60 * 60 * 1000); // have it expire in 1 day.    
+                enginesis.sessionExpires = Date.now() + (24 * 60 * 60 * 1000); // have it expire in 1 day.
                 if (sessionInfo.site_mark && sessionInfo.site_mark != enginesis.anonymousUser.userId) {
                     enginesis.anonymousUser.userId = sessionInfo.site_mark;
                     anonymousUserSave();
@@ -592,6 +609,7 @@
     /**
      * Compute the Enginesis day stamp for the current day. This must match what the server would compute
      * on the same day.
+     * @returns {Number} The session day stamp value.
      */
     function sessionDayStamp() {
         var SESSION_DAYSTAMP_HOURS = 48;
@@ -678,10 +696,10 @@
     /**
      * Helper function to determine if we call the over-ride function over the global function,
      * or neither if none are set.
-     * @param enginesisResult {object} The enginesis service response.
-     * @param resolve {function} A Promise resolve function that is always called, or null to not call a resolve function.
-     * @param overRideCallBackFunction {function} if not null this function is called with enginesisResult.
-     * @param enginesisCallBackFunction {function} if not null and overRideCallBackFunction was
+     * @param {object} enginesisResult {object} The enginesis service response.
+     * @param {function} resolve A Promise resolve function that is always called, or null to not call a resolve function.
+     * @param {function} overRideCallBackFunction if not null this function is called with enginesisResult.
+     * @param {function} enginesisCallBackFunction if not null and overRideCallBackFunction was
      *        not called then this function is called with enginesisResult.
      */
     function callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesisCallBackFunction) {
@@ -699,8 +717,8 @@
     /**
      * Internal function to handle completed service request and convert the JSON response to
      * an object and then invoke the call back function.
-     * @param stateSequenceNumber {int} locate matching request id.
-     * @returns {int} the number of entries removed. 0 if no matching entry.
+     * @param {integer} stateSequenceNumber Locate matching request id.
+     * @returns {integer} The number of entries removed. 0 if no matching entry.
      */
     function removeFromServiceQueue(stateSequenceNumber) {
         var removed = 0;
@@ -726,6 +744,7 @@
     /**
      * When we go offline or are offline, save the service queue to disk in case the app
      * terminates.
+     * @returns {boolean} True if successfully saved.
      */
     function saveServiceQueue() {
         saveObjectWithKey(enginesis.serviceQueueSaveKey, enginesis.serviceQueue);
@@ -736,6 +755,7 @@
      * When the app loads restore the saved service queue. Note we do not restore the
      * queue if we go back online because the queue is already in memory at the correct
      * state.
+     * @returns {boolean} True if there are items on the queue to be processed.
      */
     function restoreServiceQueue() {
         var serviceQueue = loadObjectWithKey(enginesis.serviceQueueSaveKey);
@@ -753,7 +773,7 @@
 
     /**
      * When reloading the service queue reset any pending transactions and run them again.
-     * @returns {Array}
+     * @returns {Array} A reference to the queue.
      */
     function resetServiceQueue() {
         var serviceQueue = enginesis.serviceQueue;
@@ -767,6 +787,10 @@
         return serviceQueue;
     }
 
+    /**
+     * Create a set of HTTP headers to communicate with the Enginesis server.
+     * @returns {Object} HTTP header to be used on an HTTP request object.
+     */
     function formatHTTPHeader() {
         // @todo: set "multipart/form" when sending files
         var httpHeaders = {
@@ -849,6 +873,10 @@
         return true;
     }
 
+    /**
+     * Return the next item on the queue.
+     * @returns {object} Item to be processed.
+     */
     function getNextUnprocessedMessage() {
         var serviceQueue = enginesis.serviceQueue;
         var unprocessedRequest = null;
@@ -868,8 +896,8 @@
 
     /**
      * Process the top-most message in the queue and call the provided resolve function when complete.
-     * @param resolve {function} A Promise resolve function, or null if no context can be determined when the function completes.
-     * @param reject {function} A Promise reject function, or null if no context can be determined when the function completes.
+     * @param {function} resolve A Promise resolve function, or null if no context can be determined when the function completes.
+     * @param {function} reject A Promise reject function, or null if no context can be determined when the function completes.
      */
     function processNextMessage(resolve, reject) {
         if (enginesis.isOnline && enginesis.serviceQueue.length > 0) {
@@ -973,10 +1001,10 @@
 
     /**
      * Internal function to send a service request to the server.
-     * @param serviceName {string} which service endpoint to call.
-     * @param parameters {object} key/value pairs for all parameters to send.
-     * @param overRideCallBackFunction {function} optional function to call when service request completes.
-     * @returns {Promise} a promise object is returned that resolves when the service request completes.
+     * @param {string} serviceName Which service endpoint to call.
+     * @param {object} parameters Key/value pairs for all parameters to send.
+     * @param {function} overRideCallBackFunction Optional function to call when service request completes.
+     * @returns {Promise} A promise object is returned that resolves when the service request completes.
      */
     function sendRequest(serviceName, parameters, overRideCallBackFunction) {
         return new Promise(function(resolve, reject) {
@@ -1005,6 +1033,18 @@
         });
     }
 
+    /**
+     * When a process fails on the client, we don't need to send a request to the server. In order
+     * to keep the process flow, send back an error that wll immediatly resolve to a proper
+     * EnginesisResult with the error information.
+     *
+     * @param {string} serviceName Enginesis service name.
+     * @param {object} parameters Parameters sent to server.
+     * @param {string} errorCode Enginesis error code to send.
+     * @param {string} errorMessage Additional error information.
+     * @param {function} overRideCallBackFunction Function to call with result.
+     * @returns {Promise} A promise that will resolve with the EnginesisResult as an error response.
+     */
     function immediateErrorResponse(serviceName, parameters, errorCode, errorMessage, overRideCallBackFunction) {
         return new Promise(function(resolve) {
             var enginesisResult = forceErrorResponseObject(serviceName, 0, errorCode, errorMessage);
@@ -1015,9 +1055,9 @@
     /**
      * Internal function to make a parameter object complementing a service request. Depending on the
      * current state of the system specific internal variables are appended to the service request.
-     * @param serviceName {string} Enginesis service endpoint.
-     * @param additionalParameters {object} key/value pairs of parameters and their respective values.
-     * @returns {object}
+     * @param {string} serviceName Enginesis service endpoint.
+     * @param {object} additionalParameters Key/value pairs of parameters and their respective values.
+     * @returns {object} An object to be used in an Enginesis service request.
      */
     function serverParamObjectMake (serviceName, additionalParameters) {
         enginesis.internalStateSeq += 1;
@@ -1052,10 +1092,10 @@
     /**
      * Generate an internal error that looks the same as an error response from the server.
      * @param {string} serviceName The official Enginesis service endpoint that was invoked.
-     * @param {int} stateSeq Session serial number.
+     * @param {integer} stateSeq Session serial number.
      * @param {string} errorCode An Enginesis error code.
      * @param {string} errorMessage Additional info about the error, such as data conditions.
-     * @return {string} a JSON string representing a standard Enginesis error.
+     * @returns {string} a JSON string representing a standard Enginesis error.
      */
     function forceErrorResponseString(serviceName, stateSeq, errorCode, errorMessage) {
         return JSON.stringify(forceErrorResponseObject(serviceName, stateSeq, errorCode, errorMessage));
@@ -1064,7 +1104,7 @@
     /**
      * Generate an internal error that looks the same as an error response from the server.
      * @param {string} serviceName The official Enginesis service endpoint that was invoked.
-     * @param {int} sequenceNumber Session serial number.
+     * @param {integer} sequenceNumber Session serial number.
      * @param {string} errorCode An Enginesis error code.
      * @param {string} errorMessage Additional info about the error, such as data conditions.
      * @param {object} passThrough Object of parameters supplied to the service endpoint.
@@ -1101,8 +1141,8 @@
 
     /**
      * Convert a parameter object to a proper HTTP Form request.
-     * @param parameterObject
-     * @returns {FormData}
+     * @param {object} parameterObject The object to convert.
+     * @returns {FormData} Form data object to be used in HTTP request.
      */
     function convertParamsToFormData (parameterObject) {
         var key;
@@ -1127,6 +1167,7 @@
 
     /**
      * When Enginesis is offline all messages are queued.
+     * @returns {boolean} True if set offline, otherwise false for online.
      */
     function setOffline() {
         var fromOnlineToOffline;
@@ -1194,8 +1235,8 @@
 
     /**
      * Set the server stage we will converse with using some simple heuristics.
-     * @param {string} newServerStage
-     * @returns {string}
+     * @param {string} newServerStage Server stage to communicate with.
+     * @returns {string} The server stage that was set.
      */
     function qualifyAndSetServerStage (newServerStage) {
         var regMatch;
@@ -1270,6 +1311,7 @@
         }
         enginesis.siteResources.serviceURL = getProtocol() + enginesis.serverHost + "/index.php";
         enginesis.siteResources.avatarImageURL = getProtocol() + enginesis.serverHost + "/avatar/index.php";
+        enginesis.siteResources.assetUploadURL = getProtocol() + enginesis.serverHost + "/procs/asset.php";
         return enginesis.serverStage;
     }
 
@@ -1306,6 +1348,10 @@
         }
     }
 
+    /**
+     * Set the language code for Enginesis error messages and service responses.
+     * @param {string} languageCode 2-letter language code, e.g. "en".
+     */
     function setLanguageCode(languageCode) {
         if (isEmpty(languageCode)) {
             languageCode = "en";
@@ -1341,7 +1387,7 @@
     /**
      * Return the contents of the cookie indexed by the specified key.
      * @param {string} key Indicate which cookie to get.
-     * @returns {string} value Contents of cookie stored with key.
+     * @returns {string} Contents of cookie stored with key.
      */
     function cookieGet (key) {
         if (typeof global.document !== "undefined" && key) {
@@ -1353,13 +1399,13 @@
 
     /**
      * Set a cookie indexed by the specified key.
-     * @param key {string} Indicate which cookie to set.
-     * @param value {String|Object} Value to store under key.
-     * @param expiration {Number|String|Date} When the cookie should expire. Number indicates
+     * @param {string} key Indicate which cookie to set.
+     * @param {object} value Value to store under key.
+     * @param {Number|String|Date}expiration When the cookie should expire. Number indicates
      *   max age, in seconds. String indicates GMT date. Date is converted to GMT date.
-     * @param path {string} Cookie URL path.
-     * @param domain {string} Cookie domain.
-     * @param isSecure {boolean} Set cookie secure flag. Default is true.
+     * @param {string} path Cookie URL path.
+     * @param {string} domain Cookie domain.
+     * @param {boolean} isSecure Set cookie secure flag. Default is true.
      * @return {boolean} true if set, false if error.
      */
     function cookieSet (key, value, expiration, path, domain, isSecure) {
@@ -1672,7 +1718,7 @@
     /**
      * Save a refresh token in local storage. We use this token to refresh a login if we
      * have a logged in user but the authentication token expired.
-     * @param refreshToken
+     * @param {string} refreshToken Refresh token to save.
      */
     function _saveRefreshToken(refreshToken) {
         if ( ! isEmpty(refreshToken)) {
@@ -1713,7 +1759,7 @@
 
     /**
      * Initialize the anonymous user data.
-     * @return object
+     * @returns {object} The user data object.
      */
     function anonymousUserInitialize() {
         return {
@@ -1731,7 +1777,7 @@
     /**
      * Load the anonymous user data from local storage. If we do not have a prior save then initialize
      * a first time user.
-     * @return object
+     * @returns {object} The user data object.
      */
     function anonymousUserLoad() {
         if (enginesis.anonymousUser == null) {
@@ -1770,7 +1816,8 @@
     }
 
     /**
-     * Create the hash.
+     * Create a hash for the anonymous user data object.
+     * @returns {string} Hash for anonymous user data.
      */
     function anonymousUserHash() {
         var anonymousUser = enginesis.anonymousUser;
@@ -1780,12 +1827,12 @@
     /**
      * Prepare a score submission to be sent securely to the server. This is an internal function and
      * not designed to be called by client code.
-     * @param {int} siteId Site identifier.
-     * @param {int} userId User who is submitting the score.
-     * @param {int} gameId Game that was played.
-     * @param {int} score Game final score.
+     * @param {integer} siteId Site identifier.
+     * @param {integer} userId User who is submitting the score.
+     * @param {integer} gameId Game that was played.
+     * @param {integer} score Game final score.
      * @param {string} gameData JSON string of game-specific play data.
-     * @param {int} timePlayed Game play time related to score and gameData, in milliseconds.
+     * @param {integer} timePlayed Game play time related to score and gameData, in milliseconds.
      * @param {string} sessionId Session id that was given at SessionBegin.
      * @returns {string} the encrypted score payload or null if an error occurred.
      */
@@ -1798,8 +1845,180 @@
     }
 
     /**
+     * Request the upload of a file to a specific Enginesis service identified by `requestType`. See Enginesis documentation
+     * regarding the request types. There are two options for indicating the file contents:
+     * 1. Provide the blob of data with `fileData` and specify a file name without any path information.
+     * 2. Provide null for `fileData` and provide a full path specifiction to a file on disk that the app can get read access to.
+     * This function makes the request to the server and in response either gets a token or an error. If the token is received then
+     * the file can be uploaded with _completeFileUpload().
+     *
+     * @param {string} requestType In order to send a file to the server you must indicate the type of service.
+     * @param {string} fileName The full path and name of the file to upload.
+     * @param {ArrayBuffer|null} fileData The file data.
+     * @return {Promise} Call the Promise.resolve function when a valid reply comes back from the server, all other conditions call the Promise.reject function.
+     */
+    function _requestFileUpload(requestType, fileName, fileData) {
+        return new Promise(function(resolve, reject) {
+            if (enginesis.assetUploadQueue == null) {
+                enginesis.assetUploadQueue = [];
+            }
+            var uploadAttributes = {
+                target: requestType,
+                token: null,
+                uploadId: 0,
+                fileName: fileName,
+                fileSize: fileData.length,
+                serverURL: '',
+                uploadTime: Date.now()
+            };
+            var parameters = {
+                site_id: enginesis.siteId,
+                action: "request",
+                target: uploadAttributes.target,
+                file: uploadAttributes.fileName,
+                size: uploadAttributes.fileSize,
+                game_id: enginesis.gameId
+            }
+            var fetchOptions = {
+                method: "POST",
+                mode: "cors",
+                credentials: "same-origin",
+                cache: 'default',
+                headers: formatHTTPHeader(),
+                body: convertParamsToFormData(parameters)
+            };
+            fetch(enginesis.siteResources.assetUploadURL, fetchOptions)
+            .then(function (response) {
+                var errorCode = '';
+                var errorMessage = '';
+                if (response && response.ok) {
+                    var contentType = response.headers.get("content-type");
+                    if (contentType && contentType.includes("application/json")) {
+                        try {
+                            var enginesisResponse = response.json()
+                            // if response is good, add to queue then schedule follow up to do the upload.
+                            if (enginesisResponse != null) {
+                                if (enginesisResponse.status && enginesisResponse.status.success == "1" && enginesisResponse.results) {
+                                    uploadAttributes.token = enginesisResponse.results.token;
+                                    uploadAttributes.uploadId = enginesisResponse.results.upload_id;
+                                    uploadAttributes.serverURL = enginesisResponse.results.path + enginesisResponse.results.file;
+                                    enginesis.assetUploadQueue.push(uploadAttributes);
+                                    _completeFileUpload(uploadAttributes, fileData)
+                                    .then(function(enginesisResponse) {
+                                        resolve(enginesisResponse);
+                                    }, function (enginesisResponse) {
+                                        resolve(enginesisResponse);
+                                    })
+                                    .catch(function(exception) {
+                                        throw(exception);
+                                    });
+                                    return;
+                                } else {
+                                    errorCode = "SERVICE_ERROR";
+                                    errorMessage = "Error: " + enginesisResponse.status.extended_info + " Received from service with " + fileName + " with size " + fileSize + ".";
+                                }
+                            } else {
+                                errorCode = "SERVICE_ERROR";
+                                errorMessage = "There was a service error during the upload operation. The support team has been notified.";
+                            }
+                        } catch (exception) {
+                            errorCode = "SERVICE_ERROR";
+                            errorMessage = exception.getErrorMessage();
+                        }
+                    } else {
+                        errorCode = "SERVICE_ERROR";
+                        errorMessage = "Unexpected response received from service when requesting upload token.";
+                    }
+                } else {
+                    errorCode = "SERVICE_ERROR";
+                    errorMessage = "Error received from service when requesting upload token.";
+                }
+                reject(makeErrorResponse(errorCode, errorMessage, parameters));
+            }, function (error) {
+                errorMessage = "Network error from service when requesting token. " + error.toString();
+                reject(makeErrorResponse("SERVICE_ERROR", errorMessage, parameters));
+            }).catch(function (exception) {
+                errorMessage = "Unexpected response received from service when requesting token with " + exception.toString() + ".";
+                reject(makeErrorResponse("SERVICE_ERROR", errorMessage, parameters));
+            });
+        });
+    }
+
+    /**
+     * Complete an Enginesis asset file upload when a request was previously made and an upload token
+     * has been granted. Parameter `uploadAttributes` holds the attributes of the in-progress upload,
+     * such as target, fileName, fileSize, token, uploadId, and others.
+     *
+     * @param {Object} uploadAttributes The attributes of a file upload request that is in progress.
+     * @param {Blob} fileData The data of the file that is to be sent to the server.
+     * @return {Promise} A promise is returned that resolves once the file upload is complete.
+     */
+    function _completeFileUpload(uploadAttributes, fileData) {
+        return new Promise(function(resolve, relect) {
+            var parameters = {
+                site_id: enginesis.siteId,
+                game_id: enginesis.gameId,
+                action: "upload",
+                target: uploadAttributes.target,
+                file: uploadAttributes.fileName,
+                size: uploadAttributes.fileSize,
+                token: uploadAttributes.token,
+                image: fileData
+            }
+            var fetchOptions = {
+                method: "POST",
+                mode: "cors",
+                credentials: "same-origin",
+                cache: 'default',
+                headers: formatHTTPHeader(),
+                body: convertParamsToFormData(parameters)
+            };
+            fetch(enginesis.siteResources.assetUploadURL, fetchOptions)
+            .then(function (response) {
+                var errorCode = '';
+                var errorMessage = '';
+                if (response && response.ok) {
+                    var contentType = response.headers.get("content-type");
+                    if (contentType && contentType.includes("application/json")) {
+                        try {
+                            var enginesisResponse = response.json()
+                            if (enginesisResponse != null) {
+                                if (enginesisResponse.enginesisResponse && response.status.success == "1") {
+                                    resolve(enginesisResponse);
+                                } else {
+                                    errorCode = "SERVICE_ERROR";
+                                    errorMessage = "Error: " + enginesisResponse.status.extended_info + " Received from service with " + fileName + " with size " + fileSize + ".";
+                                }
+                            } else {
+                                errorCode = "SERVICE_ERROR";
+                                errorMessage = "There was a service error during the upload operation. The support team has been notified.";
+                            }
+                        } catch (exception) {
+                            errorCode = "SERVICE_ERROR";
+                            errorMessage = exception.getErrorMessage();
+                        }
+                    } else {
+                        errorCode = "SERVICE_ERROR";
+                        errorMessage = "Unexpected response received from service when requesting upload token.";
+                    }
+                } else {
+                    errorCode = "SERVICE_ERROR";
+                    errorMessage = "Error received from service when requesting upload token.";
+                }
+                reject(makeErrorResponse(errorCode, errorMessage, parameters));
+            }, function (error) {
+                errorMessage = "Network error from service when requesting token. " + error.toString();
+                reject(makeErrorResponse("SERVICE_ERROR", errorMessage, parameters));
+            }).catch(function (exception) {
+                errorMessage = "Unexpected response received from service when requesting token with " + exception.toString() + ".";
+                reject(makeErrorResponse("SERVICE_ERROR", errorMessage, parameters));
+            });
+        });
+    }
+
+    /**
      * Compute MD5 checksum for the given string.
-     * @param s {string} string/byte array to compute the checksum.
+     * @param {string} s String/byte array to compute the checksum.
      * @returns {string} MD5 checksum.
      */
     enginesis.md5 = function (s) {
@@ -2284,9 +2503,9 @@
 
     /**
      * Call any service endpoint.
-     * @param serviceName {string|object} if object, expects service name to be in the "fn" property
-     * @param parameters {object|null}
-     * @returns {Promise}
+     * @param {string|object} serviceName If string, the Enginesis service name. If object, expects service name to be in the "fn" property of the object.
+     * @param {object|null} parameters Key/value parameters to send with request.
+     * @returns {Promise} Promise that will resolve when the server replies.
      */
     enginesis.request = function(serviceName, parameters) {
         if (typeof serviceName === "object" && typeof serviceName.fn === "string") {
@@ -2298,7 +2517,7 @@
 
     /**
      * Return the Enginesis version.
-     * @returns {string}
+     * @returns {string} Version.
      */
     enginesis.versionGet = function () {
         return enginesis.VERSION;
@@ -2306,7 +2525,7 @@
 
     /**
      * Determine if we have a logged in user.
-     * @returns {boolean}
+     * @returns {boolean} True if logged in.
      */
     enginesis.isUserLoggedIn = function () {
         return enginesis.loggedInUserInfo && Math.floor(enginesis.loggedInUserInfo.user_id) > 0 && enginesis.authToken != "" && enginesis.authTokenWasValidated;
@@ -2331,7 +2550,7 @@
 
     /**
      * Return the error of the most recent service call.
-     * @returns {object}
+     * @returns {object} EnginesisError object.
      */
     enginesis.getLastError = function () {
         return {
@@ -2413,7 +2632,7 @@
      * so it looks the same as real error responses.
      *
      * @param {string} serviceName The official Enginesis service endpoint that was invoked.
-     * @param {int} stateSeq Session serial number.
+     * @param {integer} stateSeq Session serial number.
      * @param {string} errorCode An Enginesis error code.
      * @param {string} errorMessage Additional info about the error, such as data conditions.
      * @param {object} passThrough Object of parameters supplied to the service endpoint.
@@ -2469,7 +2688,7 @@
      * Return an object of user information. If no user is logged in a valid object is still returned
      * but with invalid user info. Note we do not hand out `loggedInUserInfo` because there are
      * certain properties we do not want clients to access or change.
-     * @returns {object}
+     * @returns {object} User info.
      */
     enginesis.getLoggedInUserInfo = function () {
         if (enginesis.isUserLoggedIn()) {
@@ -2505,8 +2724,8 @@
 
     /**
      * Determine if the user name is a valid format that would be accepted by the server.
-     * @param userName {string}
-     * @returns {boolean}
+     * @param {string} userName User name to check.
+     * @returns {boolean} True if considered valid.
      */
     enginesis.isValidUserName = function (userName) {
         // @todo: reuse the regex we used on enginesis or varyn
@@ -2515,8 +2734,8 @@
 
     /**
      * Determine if the password is a valid password that will be accepted by the server.
-     * @param password {string}
-     * @returns {boolean}
+     * @param {string} password Password to check.
+     * @returns {boolean} True if considered valid.
      */
     enginesis.isValidPassword = function (password) {
         // @todo: reuse the regex we use on enginesis or varyn
@@ -2534,7 +2753,7 @@
 
     /**
      * Determine and set the server stage from the specified string. It can be a stage request or a domain.
-     * @param newServerStage {string}
+     * @param {string} newServerStage
      * @returns {string}
      */
     enginesis.serverStageSet = function (newServerStage) {
@@ -2552,8 +2771,8 @@
     /**
      * Get and/or set the use HTTPS flag, allowing the caller to force the protocol. By default we set
      * useHTTPS from the current document location. This allows the caller to query it and override its value.
-     * @param: {boolean} useHTTPSFlag should be either true to force https or false to force http, or undefined to leave it as is
-     * @returns: {boolean} the current state of the useHTTPS flag.
+     * @param {boolean} useHTTPSFlag should be either true to force https or false to force http, or undefined to leave it as is
+     * @returns {boolean} the current state of the useHTTPS flag.
      */
     enginesis.setHTTPS = function (useHTTPSFlag) {
         if (typeof useHTTPSFlag !== "undefined") {
@@ -2562,10 +2781,18 @@
         return enginesis.useHTTPS;
     };
 
+    /**
+     * Determine if using HTTPS.
+     * @returns {boolean} True if using HTTPS.
+     */
     enginesis.isHTTPS = function() {
         return enginesis.useHTTPS;
     };
 
+    /**
+     * Get the current HTTP protocol.
+     * @returns {string} HTTP protocol, either "http" or "https".
+     */
     enginesis.getProtocol = function() {
         return getProtocol();
     };
@@ -2585,14 +2812,14 @@
      * is configured on the server for each site and the server should be queried the first time to get
      * them. They rarely change so caching should be fine. This function returns
      * an object populated with the following urls:
-     *  .root = the root of the website
-     *  .profile = the page that holds the user's profile page when they are logged in
-     *  .register = the page users go to register new accounts
-     *  .forgotPassword = the page users go to reset their password
-     *  .login = the page users go to log in
-     *  .privacy = the page holding the privacy policy
-     *  .terms = the page holding the terms of use/service policy
-     *  .play = the page where to play a game
+     *  * `root` = the root of the website
+     *  * `profile` = the page that holds the user's profile page when they are logged in
+     *  * `register` = the page users go to register new accounts
+     *  * `forgotPassword` = the page users go to reset their password
+     *  * `login` = the page users go to log in
+     *  * `privacy` = the page holding the privacy policy
+     *  * `terms` = the page holding the terms of use/service policy
+     *  * `play` = the page where to play a game
      * @returns {object} object holding the set of server URLs.
      */
     enginesis.getSiteSpecificUrls = function() {
@@ -2638,9 +2865,9 @@
 
     /**
      * Set or override the current game-id.
-     * @param newGameId {integer} An Enginesis game identifier.
-     * @param newGameKey {string} The Enginesis game key associated with the game id.
-     * @returns {*}
+     * @param {integer} newGameId An Enginesis game identifier.
+     * @param {string} newGameKey The Enginesis game key associated with the game id.
+     * @returns {boolean} True if set.
      */
     enginesis.gameIdSet = function (newGameId, newGameKey) {
         if (enginesis.gameId != newGameId) {
@@ -2652,7 +2879,7 @@
 
     /**
      * Return the current game-group-id.
-     * @returns {number}
+     * @returns {integer}
      */
     enginesis.gameGroupIdGet = function () {
         return enginesis.gameGroupId;
@@ -2660,8 +2887,8 @@
 
     /**
      * Set or override the current game-group-id.
-     * @param newGameGroupId
-     * @returns {number}
+     * @param {integer} newGameGroupId
+     * @returns {integer}
      */
     enginesis.gameGroupIdSet = function (newGameGroupId) {
         return enginesis.gameGroupId = newGameGroupId;
@@ -2669,7 +2896,7 @@
 
     /**
      * Return the current site-id.
-     * @returns {number}
+     * @returns {integer}
      */
     enginesis.siteIdGet = function () {
         return enginesis.siteId;
@@ -2677,7 +2904,7 @@
 
     /**
      * Return the list of supported networks capable of SSO.
-     * @returns {enginesis.supportedNetworks|{Enginesis, Facebook, Google, Twitter}}
+     * @returns {enginesis.supportedNetworks|{Enginesis, Facebook, Google, Twitter, Apple}}
      */
     enginesis.supportedSSONetworks = function() {
         return enginesis.supportedNetworks;
@@ -2685,13 +2912,13 @@
 
     /**
      * Return the URL of the request game image.
-     * @param parameters {object} Parameters object as we want to be flexible about what we will accept.
-     *    Parameters are:
-     *    gameName {string} game folder on server where the game assets are stored. Most of the game queries
+     * @param {object} parameters Parameters object as we want to be flexible about what we will accept.
+     * Parameters are:
+     * * `gameName` {string} game folder on server where the game assets are stored. Most of the game queries
      *    (GameGet, GameList, etc) return game_name and this is used as the game folder.
-     *    width {int} optional width, use null to ignore. Server will choose common width.
-     *    height {int} optional height, use null to ignore. Server will choose common height.
-     *    format {string} optional image format, use null and server will choose. Otherwise {jpg|png|svg}
+     * * `width` {integer} optional width, use null to ignore. Server will choose common width.
+     * * `height` {integer} optional height, use null to ignore. Server will choose common height.
+     * * `format` {string} optional image format, use null and server will choose. Otherwise {jpg|png|svg}
      * @returns {string} a URL you can use to load the image.
      * @todo: this really needs to call a server-side service to perform this resolution as we need to use PHP to determine which files are available and the closest match.
      */
@@ -2750,8 +2977,8 @@
      *   "m" or anything that beings with "m|M" is considered "male" and will return "M".
      *   "f" or anything that beings with "f|F" is considered "female" and will return "F".
      *   Anything else is considered unknown and will return "U".
-     * @param gender {string} proposed gender value.
-     * @returns {string|*} one of "M", "F", "U".
+     * @param {string} gender Proposed gender value.
+     * @returns {string} one of "M", "F", "U".
      */
     enginesis.validGender = function(gender) {
         return validGender(gender);
@@ -2770,9 +2997,9 @@
 
     /**
      * Call Enginesis SessionBegin which is used to start any conversation with the server. Must call before beginning a game.
-     * @param gameKey {string} service provided game key matching gameId
-     * @param gameId {int|null} The game id. If null/0 then assumes the gameId was set in teh constructor or with gameIdSet()
-     * @param overRideCallBackFunction {function} call when server replies.
+     * @param {string} gameKey service provided game key matching gameId
+     * @param {integer|null} gameId The game id. If null/0 then assumes the gameId was set in teh constructor or with gameIdSet()
+     * @param {function} overRideCallBackFunction Call when server replies.
      * @returns {boolean}
      */
     enginesis.sessionBegin = function (gameKey, gameId, overRideCallBackFunction) {
@@ -2795,8 +3022,8 @@
     /**
      * Call Enginesis SessionRefresh to exchange the long-lived refresh token for a new authentication token. Usually you
      * call this when you attempt to call a service and it replied with TOKEN_EXPIRED.
-     * @param refreshToken {string} optional, if not provided (empty/null) then we try to pull the one we have in the local store.
-     * @param overRideCallBackFunction
+     * @param {string} refreshToken optional, if not provided (empty/null) then we try to pull the one we have in the local store.
+     * @param {function} overRideCallBackFunction
      * @returns {Promise} Resolves if successful but if fails then call getLastError to get an error code as to what went wrong.
      */
     enginesis.sessionRefresh = function (refreshToken, overRideCallBackFunction) {
@@ -2815,7 +3042,7 @@
         if ( ! enginesis.isUserLoggedIn()) {
             siteMark = enginesis.anonymousUser.userId;
         }
-        return sendRequest(serviceName, {token: refreshToken, game_id: game_id, gamekey: gameKey, site_mark: siteMark}, overRideCallBackFunction);
+        return sendRequest(serviceName, {refresh_token: refreshToken, game_id: game_id, gamekey: gameKey, site_mark: siteMark}, overRideCallBackFunction);
     };
 
     /**
@@ -2830,10 +3057,10 @@
 
     /**
      * Submit a vote for a URI key.
-     * @param voteURI {string} the URI key of the item we are voting on.
-     * @param voteGroupURI {string} the URI group used to sub-group keys, for example you are voting on the best of 5 images.
-     * @param voteValue {int} the value of the vote. This depends on the voting system set by the URI key/group (for example a rating vote may range from 1 to 5.)
-     * @param overRideCallBackFunction
+     * @param {string} voteURI The URI key of the item we are voting on.
+     * @param {string} voteGroupURI The URI group used to sub-group keys, for example you are voting on the best of 5 images.
+     * @param {integer} voteValue The value of the vote. This depends on the voting system set by the URI key/group (for example a rating vote may range from 1 to 5.)
+     * @param {function} overRideCallBackFunction
      * @returns {boolean}
      */
     enginesis.voteForURIUnauth = function (voteURI, voteGroupURI, voteValue, securityKey, overRideCallBackFunction) {
@@ -2842,9 +3069,9 @@
 
     /**
      * Return voting results by voting group key.
-     * @param voteGroupURI {string} voting group that collects all the items to be voted on
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {string} voteGroupURI voting group that collects all the items to be voted on
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      * @seealso: addOrUpdateVoteByURI
      */
     enginesis.voteCountPerURIGroup = function (voteGroupURI, overRideCallBackFunction) {
@@ -2853,9 +3080,9 @@
 
     /**
      * Return information about a specific Enginesis Developer.
-     * @param developerId {int} developer id.
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} developerId Developer id.
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.developerGet = function (developerId, overRideCallBackFunction) {
         return sendRequest("DeveloperGet", {developer_id: developerId}, overRideCallBackFunction);
@@ -2863,8 +3090,8 @@
 
     /**
      * Get user generated game data. Not to be confused with gameConfigGet (which is system generated.)
-     * @param: {int} gameDataId The specific id assigned to the game data to get. Was generated by gameDataCreate.
-     * @returns: {boolean} status of send to server.
+     * @param {integer} gameDataId The specific id assigned to the game data to get. Was generated by gameDataCreate.
+     * @returns {Promise}
      */
     enginesis.gameDataGet = function (gameDataId, overRideCallBackFunction) {
         return sendRequest("GameDataGet", {game_data_id: gameDataId}, overRideCallBackFunction);
@@ -2883,8 +3110,8 @@
      * @param nameTag
      * @param addToGallery
      * @param lastScore
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameDataCreate = function (referrer, fromAddress, fromName, toAddress, toName, userMessage, userFiles, gameData, nameTag, addToGallery, lastScore, overRideCallBackFunction) {
         return sendRequest("GameDataCreate", {
@@ -2903,51 +3130,90 @@
     };
 
     /**
-     * Send to Friend is the classic share a game service. It uses GameDataCreate service but optimized to a game share
-     * instead of a game play.
-     * @param fromAddress
-     * @param fromName
-     * @param toAddress
-     * @param userMessage
-     * @param lastScore
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * Send to Friend is the classic share a game service. It uses the GameDataCreate service but 
+     * optimized to sharing a game or a user's completed game that she wants to share with a friend.
+     * @param {object} sendAttributes Required and optional parameters to send.
+     *   * `referrer`: Optional, string to indicate the origin of the request. Usually provide the game_name here but it isn't necessary.
+     *   * `from_address`: Email address of the sender. Optional is user is logged in, then will use registered user's email. Required if user is not logged in and unauthenticated send is allowed.
+     *   * `from_name`: Optional, string indicating sender user's name, used only when from_address is used.
+     *   * `to_address`: Required, email address to send to.
+     *   * `to_name`: Required, name of the recipient.
+     *   * `user_message`: Optional, string of additional user message to include in the email.
+     *   * `game_data`: Optional, additional game data to be provided in the message that could be passed into the game when the recipient goes to play it.
+     *   * `name_tag`: Optional, string, additional search tags to assign to the game data.
+     *   * `add_to_gallery`: Optional, boolean, 1 to include this in a gallery, 0 to not include in the game gallery.
+     *   * `last_score`: Optional, a game score to provide with the game data and report in the user email.
+     *   * `image`: Optional, blob, an image to include in the email message.
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise} Resolves when the server request completes.
      */
-    enginesis.sendToFriend = function(fromAddress, fromName, toAddress, userMessage, lastScore, overRideCallBackFunction) {
+    enginesis.sendToFriend = function(sendAttributes, overRideCallBackFunction) {
         var errorCode = "";
         var service = "GameDataCreate";
-        if (( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) && (isEmpty(fromAddress) || isEmpty(fromName))) {
+        if (( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) && (isEmpty(sendAttributes.fromAddress) || isEmpty(sendAttributes.fromName))) {
             // if not logged in, fromAddress, fromName must be provided. Otherwise we get it on the server from the logged in user info.
             errorCode = "INVALID_PARAMETER";
         } else if (isEmpty(enginesis.gameId)) {
             errorCode = "INVALID_GAME_ID";
         }
         if (errorCode == "") {
-            return sendRequest(service, {
-                referrer: "Enginesis",
-                from_address: fromAddress,
-                from_name: fromName,
-                to_address: toAddress,
-                to_name: "User",
-                user_msg: userMessage,
+            var requestParameters = {
+                referrer: sendAttributes.referrer || "enginesis",
+                from_address: sendAttributes.from_address || "",
+                from_name: sendAttributes.from_name || "",
+                to_address: sendAttributes.to_address || "",
+                to_name: sendAttributes.to_name || "User",
+                user_msg: sendAttributes.user_message || "",
                 user_files: "",
-                game_data: "",
-                name_tag: "",
-                add_to_gallery: 0,
-                last_score: lastScore
-            }, overRideCallBackFunction);
+                game_data: sendAttributes.game_data || "",
+                name_tag: sendAttributes.name_tag || "",
+                add_to_gallery: sendAttributes.add_to_gallery || 0,
+                last_score: sendAttributes.last_score || 0
+            };
+            if (sendAttributes.game_image) {
+                return new Promise(function(resolve) {
+                    _requestFileUpload("gameshare", "game_image.png", sendAttributes.game_image)
+                    .then(function(enginesisResponse) {
+                        if (enginesisResponse.status && enginesisResponse.status.success == "1") {
+                            requestParameters.user_files = enginesisResponse.results.path + response.results.file;
+                        }
+                        sendRequest(service, requestParameters, overRideCallBackFunction)
+                        .then(function(enginesisResponse) {
+                            resolve(enginesisResponse);
+                        });
+                    }, function(enginesisResponse) {
+                        // there was an error uploading the file, should deal with it, but OK to continue
+                        debugLog("SendToFriend error " + enginesisResponse.toString() + " while uploading image, continuing anyway.");
+                        sendRequest(service, requestParameters, overRideCallBackFunction)
+                        .then(function(enginesisResponse) {
+                            resolve(enginesisResponse);
+                        });
+                    })
+                    .catch(function(exception) {
+                        // there was an error uploading the file, should deal with it, but OK to continue
+                        debugLog("SendToFriend exception " + exception.toString() + " while uploading image, continuing anyway.");
+                        sendRequest(service, requestParameters, overRideCallBackFunction)
+                        .then(function(enginesisResponse) {
+                            resolve(enginesisResponse);
+                        });
+                    });
+                    // callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
+                });
+            } else {
+                return sendRequest(service, requestParameters, overRideCallBackFunction);
+            }
         } else {
-            return immediateErrorResponse(service, {game_id: gameId, from_address: fromAddress, from_name: fromName}, errorCode, "Error encountered while processing send to friend.", overRideCallBackFunction);
+            return immediateErrorResponse(service, {game_id: enginesis.gameId, from_address: sendAttributes.from_address, from_name: sendAttributes.from_name}, errorCode, "Error " + errorCode + " encountered while processing send to friend.", overRideCallBackFunction);
         }
     };
 
     /**
      * Get game data configuration. Not to be confused with GameData (which is user generated.)
-     * @param: {int} gameConfigId A specific game data configuration to get. If provided the other parameters are ignored.
-     * @param: {int} gameId The gameId, if 0 then the gameId set previously will be assumed. gameId is mandatory.
-     * @param: {int} categoryId A category id if the game organizes its data configurations by categories. Otherwise use 0.
-     * @param: {date} airDate A specific date to return game configuration data. Use "" to let the server decide (usually means "today" or most recent.)
-     * @returns: {boolean} status of send to server.
+     * @param {integer} gameConfigId A specific game data configuration to get. If provided the other parameters are ignored.
+     * @param {integer} gameId The gameId, if 0 then the gameId set previously will be assumed. gameId is mandatory.
+     * @param {integer} categoryId A category id if the game organizes its data configurations by categories. Otherwise use 0.
+     * @param {date} airDate A specific date to return game configuration data. Use "" to let the server decide (usually means "today" or most recent.)
+     * @returns {Promise}
      */
     enginesis.gameConfigGet = function (gameConfigId, gameId, categoryId, airDate, overRideCallBackFunction) {
         if (typeof gameConfigId === "undefined") {
@@ -2967,12 +3233,12 @@
 
     /**
      * Track a game event for game-play metrics.
-     * @param category {string} what generated the event
-     * @param action {string} what happened (LOAD, PLAY, GAMEOVER, EVENT, ZONECHG)
-     * @param label {string} path in game where event occurred
-     * @param hitData {string} a value related to the action, quantifying the action, if any
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {string} category what generated the event
+     * @param {string} action what happened (LOAD, PLAY, GAMEOVER, EVENT, ZONECHG)
+     * @param {string} label path in game where event occurred
+     * @param {string} hitData a value related to the action, quantifying the action, if any
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameTrackingRecord = function (category, action, label, hitData, overRideCallBackFunction) {
         if (enginesis.isBrowserBuild && global.ga != undefined) {
@@ -2984,19 +3250,19 @@
 
     /**
      * Search for games given a keyword search.
-     * @param game_name_part
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {string} game_name_part
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameFind = function(game_name_part, overRideCallBackFunction) {
         return sendRequest("GameFind", {game_name_part: game_name_part}, overRideCallBackFunction);
     };
 
     /**
-     * Search for games by only search game names.
-     * @param gameName
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * Search for games by only searching game names.
+     * @param {string} gameName Game name or part of game name to search for.
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameFindByName = function (gameName, overRideCallBackFunction) {
         return sendRequest("GameFindByName", {game_name: gameName}, overRideCallBackFunction);
@@ -3004,9 +3270,9 @@
 
     /**
      * Return game info given a specific game-id.
-     * @param gameId
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} gameId Id of game to get.
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameGet = function (gameId, overRideCallBackFunction) {
         return sendRequest("GameGet", {game_id: gameId}, overRideCallBackFunction);
@@ -3014,9 +3280,9 @@
 
     /**
      * Return game info given the game name.
-     * @param gameName
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {string} gameName
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameGetByName = function (gameName, overRideCallBackFunction) {
         return sendRequest("GameGetByName", {game_name: gameName}, overRideCallBackFunction);
@@ -3024,10 +3290,10 @@
 
     /**
      * Return a list of games for each game category.
-     * @param numItemsPerCategory
-     * @param gameStatusId
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} numItemsPerCategory
+     * @param {integer} gameStatusId
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameListByCategory = function (numItemsPerCategory, gameStatusId, overRideCallBackFunction) {
         return sendRequest("GameListByCategory", {num_items_per_category: numItemsPerCategory, game_status_id: gameStatusId}, overRideCallBackFunction);
@@ -3035,8 +3301,8 @@
 
     /**
      * Return a list of available game lists for the current site-id.
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameListList = function (overRideCallBackFunction) {
         return sendRequest("GameListList", {}, overRideCallBackFunction);
@@ -3044,9 +3310,9 @@
 
     /**
      * Return the list of games belonging to the requested game list id.
-     * @param gameListId
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} gameListId
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameListListGames = function (gameListId, overRideCallBackFunction) {
         return sendRequest("GameListListGames", {game_list_id: gameListId}, overRideCallBackFunction);
@@ -3054,9 +3320,9 @@
 
     /**
      * Return the list of games belonging to the requested game list given its name.
-     * @param gameListName
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {string} gameListName
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameListListGamesByName = function (gameListName, overRideCallBackFunction) {
         return sendRequest("GameListListGamesByName", {game_list_name: gameListName}, overRideCallBackFunction);
@@ -3068,10 +3334,10 @@
 
     /**
      * Return a list of games when given a list of individual game ids. Specify the list delimiter, default is ','.
-     * @param gameIdList
-     * @param delimiter
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} gameIdList
+     * @param {string} delimiter
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.gameListByIdList = function (gameIdList, delimiter, overRideCallBackFunction) {
         return sendRequest("GameListByIdList", {game_id_list: gameIdList, delimiter: delimiter}, overRideCallBackFunction);
@@ -3114,12 +3380,12 @@
     /**
      * Submit a final game score to the server. This requires a logged in user and a prior
      * call to SessionBegin to establish a game session with the server.
-     * @param {int|null} gameId if 0/null provided we use the gameId set on the Enginesis object. A
+     * @param {integer|null} gameId if 0/null provided we use the gameId set on the Enginesis object. A
      *    game id is mandatory for sumitting a score.
-     * @param {int} score a value within the range established for the game.
+     * @param {integer} score a value within the range established for the game.
      * @param {string} gameData option data regarding the game play. This is data specific to the
      *    game but should be in a consistent format for all submissions of that game.
-     * @param {int} timePlayed the number of milliseconds the game was played for the game play
+     * @param {integer} timePlayed the number of milliseconds the game was played for the game play
      *    session that produced the score (i.e. don't include canceled games, restarts, total time
      *    the app was open, etc.)
      * @param {function} overRideCallBackFunction once the server responds resolve to this function.
@@ -3298,7 +3564,8 @@
      * token (authtok) is sent back from the server.
      * @param user_id
      * @param secondary_password
-     * @param overRideCallBackFunction
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.registeredUserConfirm = function (user_id, secondary_password, overRideCallBackFunction) {
         return sendRequest("RegisteredUserConfirm", {user_id: user_id, secondary_password: secondary_password}, overRideCallBackFunction);
@@ -3308,10 +3575,10 @@
      * this function generates the email that is sent to the email address matching username or email address.
      * that email leads to the change password web page. Currently only user name or email address is required to invoke
      * the flow, but we should consider more matching info before we start it in case accounts are being hacked.
-     * @param userName
-     * @param email
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {string} userName
+     * @param {string} email
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.registeredUserForgotPassword = function (userName, email, overRideCallBackFunction) {
         return sendRequest("RegisteredUserForgotPassword", {user_name: userName, email: email}, overRideCallBackFunction);
@@ -3320,13 +3587,21 @@
     /**
      * this function generates the email that is sent to the email address matching user_id if the secondary password matches.
      * This is used when the secondary password is attempted but expired (such as user lost the reset email).
-     * @param user_id - the user in question.
-     * @param secondary_password - the original secondary password generated in forgot password flow.
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     *
+     * @param {integer} user_id - the user in question, required if using secondary password flow, optional if using user_name or email_address.
+     * @param {string} user_name - the user in question if you do not know the user_id
+     * @param {string} email_address - identify the user by email address
+     * @param {string} secondary_password - the original secondary password generated in forgot password flow.
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
-    enginesis.registeredUserResetSecondaryPassword = function (user_id, secondary_password, overRideCallBackFunction) {
-        return sendRequest("RegisteredUserResetSecondaryPassword", {user_id: userid, secondary_password: secondary_password}, overRideCallBackFunction);
+    enginesis.registeredUserResetSecondaryPassword = function (user_id, user_name, email_address, secondary_password, overRideCallBackFunction) {
+        return sendRequest("RegisteredUserResetSecondaryPassword", {
+            user_id: user_id,
+            user_name: user_name,
+            email_address: email_address,
+            secondary_password: secondary_password
+        }, overRideCallBackFunction);
     };
 
     enginesis.registeredUserRequestPasswordChange = function (overRideCallBackFunction) {
@@ -3335,7 +3610,7 @@
         }, overRideCallBackFunction);
     };
 
-        // @todo: Should include the user-id?
+    // @todo: Should include the user-id?
     enginesis.registeredUserPasswordChange = function (captcha_id, captcha_response, password, secondary_password, overRideCallBackFunction) {
         return sendRequest("RegisteredUserPasswordChange", {
             site_id: siteId,
@@ -3419,8 +3694,8 @@
      *   avatarURL
      *   idToken
      *   scope
-     * @param networkId {int} we must know which network this registration comes from.
-     * @param overRideCallBackFunction {function} called when server replies.
+     * @param {integer} networkId We must know which network this registration comes from.
+     * @param {function} overRideCallBackFunction {function} called when server replies.
      */
     enginesis.userLoginCoreg = function (registrationParameters, networkId, overRideCallBackFunction) {
         if (typeof registrationParameters.siteUserId === "undefined" || registrationParameters.siteUserId.length == 0) {
@@ -3480,9 +3755,9 @@
 
     /**
      * Return the proper URL to use to show an avatar for a given user. The default is the default size and the current user.
-     * @param size {int} 0 small, 1 medium, 2 large
-     * @param userId {int}
-     * @return string
+     * @param {integer} size 0 small, 1 medium, 2 large
+     * @param {integer} userId Id of the user.
+     * @return {string} URL.
      */
     enginesis.avatarURL = function (size, userId) {
         if (userId == 0) {
@@ -3499,8 +3774,9 @@
 
     /**
      * Get information about a specific quiz.
-     * @param quiz_id
-     * @param overRideCallBackFunction
+     * @param {integer} quiz_id
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.quizGet = function (quiz_id, overRideCallBackFunction) {
         return sendRequest("QuizGet", {game_id: quiz_id}, overRideCallBackFunction);
@@ -3509,9 +3785,10 @@
     /**
      * Ask quiz service to begin playing a specific quiz given the quiz id. If the quiz-id does not exist
      * then an error is returned.
-     * @param quiz_id
-     * @param game_group_id
-     * @param overRideCallBackFunction
+     * @param {integer} quiz_id
+     * @param {integer} game_group_id
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.quizPlay = function (quiz_id, game_group_id, overRideCallBackFunction) {
         return sendRequest("QuizPlay", {game_id: quiz_id, game_group_id: game_group_id}, overRideCallBackFunction);
@@ -3520,9 +3797,10 @@
     /**
      * Ask quiz service to begin playing the next quiz in a scheduled quiz series. This should always return at least
      * one quiz.
-     * @param quiz_id {int} if a specific quiz id is requested we try to return this one. If for some reason we cannot, the next quiz in the scheduled series is returned.
-     * @param game_group_id {int} quiz group id.
-     * @param overRideCallBackFunction
+     * @param {integer} quiz_id if a specific quiz id is requested we try to return this one. If for some reason we cannot, the next quiz in the scheduled series is returned.
+     * @param {integer} game_group_id quiz group id.
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.quizPlayScheduled = function (quiz_id, game_group_id, overRideCallBackFunction) {
         return sendRequest("QuizPlayScheduled", {game_id: quiz_id, game_group_id: game_group_id}, overRideCallBackFunction);
@@ -3530,9 +3808,10 @@
 
     /**
      * Return a summary of quiz outcomes for the given quiz id.
-     * @param quiz_id
-     * @param game_group_id
-     * @param overRideCallBackFunction
+     * @param {integer} quiz_id
+     * @param {integer} game_group_id
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.quizOutcomesCountList = function(quiz_id, game_group_id, overRideCallBackFunction) {
         return sendRequest("QuizOutcomesCountList", {game_id: quiz_id, game_group_id: game_group_id}, overRideCallBackFunction);
@@ -3540,9 +3819,10 @@
 
     /**
      * Submit the results of a completed quiz. Results is a JSON object we need to document.
-     * @param quiz_id
-     * @param results
-     * @param overRideCallBackFunction
+     * @param {integer} quiz_id
+     * @param {object} results
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.quizSubmit = function(quiz_id, results, overRideCallBackFunction) {
         return sendRequest("QuizSubmit", {game_id: quiz_id, results: results}, overRideCallBackFunction);
@@ -3552,11 +3832,11 @@
      * When the user plays a question we record the event and the choice the user made. This helps us with question
      * usage statistics and allows us to track question consumption so the return visits to this quiz can provide
      * fresh questions for this user.
-     * @param quiz_id
-     * @param question_id
-     * @param choice_id
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} quiz_id
+     * @param {integer} question_id
+     * @param {integer} choice_id
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.quizQuestionPlayed = function(quiz_id, question_id, choice_id, overRideCallBackFunction) {
         return sendRequest("QuizQuestionPlayed", {game_id: quiz_id, question_id: question_id, choice_id: choice_id}, overRideCallBackFunction);
@@ -3567,7 +3847,7 @@
      * return an answer right away by looking at the cached list of games. If a call back function is
      * provided, the server will be queried for a updated list of favorite games and the test
      * will be done asynchronously.
-     * 
+     *
      * @param {integer} game_id A game id to check, or null/0 to check the current game id.
      * @param {function} callBackFunction If provided, query the server then call this function with the result.
      * @returns {boolean} True if the requested game_id is a favorite game for this user.
@@ -3586,8 +3866,8 @@
 
     /**
      * Get list of users favorite games. User must be logged in.
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.userFavoriteGamesList = function (overRideCallBackFunction) {
         // @todo: wait until timer expires? Or do it now because called wants it now?
@@ -3598,9 +3878,9 @@
 
     /**
      * Assign a game-id to the list of user favorite games. User must be logged in.
-     * @param game_id
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} game_id
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.userFavoriteGamesAssign = function(game_id, overRideCallBackFunction) {
         game_id = game_id || enginesis.gameId;
@@ -3610,9 +3890,9 @@
 
     /**
      * Assign a list of game-ids to the list of user favorite games. User must be logged in. List is separated by commas.
-     * @param game_id_list
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} game_id_list
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.userFavoriteGamesAssignList = function(game_id_list, overRideCallBackFunction) {
         var gameIdList = game_id_list.split(",");
@@ -3624,9 +3904,9 @@
 
     /**
      * Remove a game-id from the list of user favorite games. User must be logged in.
-     * @param game_id
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer|null} game_id
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.userFavoriteGamesUnassign = function(game_id, overRideCallBackFunction) {
         game_id = game_id || enginesis.gameId;
@@ -3636,9 +3916,9 @@
 
     /**
      * Remove a list of game-ids from the list of user favorite games. User must be logged in. List is separated by commas.
-     * @param game_id_list
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} game_id_list
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.userFavoriteGamesUnassignList = function(game_id_list, overRideCallBackFunction) {
         var gameIdList = game_id_list.split(",");
@@ -3650,10 +3930,10 @@
 
     /**
      * Change the order of a game in the list of user favorites.
-     * @param game_id
-     * @param sort_order
-     * @param overRideCallBackFunction
-     * @returns {boolean}
+     * @param {integer} game_id
+     * @param {integer} sort_order
+     * @param {function} overRideCallBackFunction
+     * @returns {Promise}
      */
     enginesis.userFavoriteGamesMove = function(game_id, sort_order, overRideCallBackFunction) {
         return sendRequest("UserFavoriteGamesMove", {game_id: game_id, sort_order: sort_order}, overRideCallBackFunction);
@@ -3668,8 +3948,8 @@
 
     /**
      * Set the user email address and save the user data.
-     * @param emailAddress
-     * @param ifChanged bool if true, only change the email if it changed. If false, only change the email if never set.
+     * @param {string} emailAddress
+     * @param {boolean} ifChanged If true, only change the email if it changed. If false, only change the email if never set.
      */
     enginesis.anonymousUserSetSubscriberEmail = function(emailAddress, ifChanged) {
         var priorValue;
@@ -3699,8 +3979,8 @@
 
     /**
      * Set the user name and save the user data.
-     * @param userName
-     * @param ifChanged bool if true, only change the name if it changed. If false, only change the name if never set.
+     * @param {string} userName
+     * @param {boolean} ifChanged If true, only change the name if it changed. If false, only change the name if never set.
      */
     enginesis.anonymousUserSetUserName = function(userName, ifChanged) {
         var priorValue;
@@ -3731,7 +4011,7 @@
     /**
      * Set the user id and save the user data only if the userId has changed. If we already
      * have a userId associated with this client then keep it.
-     * @param userId {int}
+     * @param userId {integer}
      */
     enginesis.anonymousUserSetId = function(userId) {
         if (enginesis.anonymousUser == null) {
@@ -3756,7 +4036,7 @@
 
     /**
      * Add a favorite game_id to the user favorite games list only if it does not already exist in the list.
-     * @param gameId
+     * @param {integer} gameId
      */
     enginesis.anonymousUserAddFavoriteGame = function(gameId) {
         if (enginesis.anonymousUser == null) {
@@ -3769,7 +4049,7 @@
     /**
      * Add a gameId to the list of game_ids played by this user. If the game_id already exists it moves to
      * the top of the list.
-     * @param gameId
+     * @param {integer} gameId
      */
     enginesis.anonymousUserGamePlayed = function(gameId) {
         if (enginesis.anonymousUser == null) {
