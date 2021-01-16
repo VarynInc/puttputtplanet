@@ -20,7 +20,7 @@
 
     /** @exports enginesis */
     var enginesis = {
-        VERSION: "2.6.6",
+        VERSION: "2.6.7",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -432,26 +432,56 @@
 
     /**
      * Verify the hash provided in the response is valid with the data provided. This is an
-     * attempt to verify the payload was not tampered with to spoof the session.
+     * attempt to verify the payload was not tampered with to spoof the session. In order for
+     * this to work we expect `enginesis.loggedInUserInfo` was restored from a prior session,
+     * either a current session UserLogin, a SessionRefresh, or localStorage/Cookie.
      *
-     * @param {object} sessionInfo
+     * @param {object} sessionInfo A session object sent by the Enginesis server.
      * @return {boolean} True if we think the session from the server matches the data we have locally.
      */
     function sessionVerifyGameHash(sessionInfo) {
         var isValid = false;
         var cr = sessionInfo.cr || "";
         var hash = "";
+        var userInfo = enginesis.loggedInUserInfo;
         if (cr) {
             hash = sessionMakeGameHash({
                 siteId: enginesis.siteId,
                 gameId: enginesis.gameId,
-                userId: coerceNotEmpty(enginesis.loggedInUserInfo.user_id, 0),
-                userName: coerceNotEmpty(enginesis.loggedInUserInfo.user_name, ""),
-                siteUserId: coerceNotEmpty(enginesis.loggedInUserInfo.site_user_id, ""),
-                accessLevel: coerceNotEmpty(enginesis.loggedInUserInfo.access_level, 0),
+                userId: coerceNotEmpty(userInfo.user_id, 0),
+                userName: coerceNotEmpty(userInfo.user_name, ""),
+                siteUserId: coerceNotEmpty(userInfo.site_user_id, ""),
+                accessLevel: coerceNotEmpty(userInfo.access_level, 0),
                 siteKey: enginesis.developerKey
             });
             isValid = cr == hash;
+            if ( ! isValid) {
+                // if not valid, it could be because the users authentication expired
+                userInfo.dayStamp = sessionDayStamp();
+                hash = sessionMakeGameHash({
+                    siteId: enginesis.siteId,
+                    gameId: enginesis.gameId,
+                    userId: 0,
+                    userName: "",
+                    siteUserId: "",
+                    accessLevel: 10,
+                    siteKey: enginesis.developerKey
+                });
+                isValid = cr == hash;
+                if (isValid) {
+                    // game session is good but the user must refresh their authentication
+                    debugLog("sessionVerifyGameHash Session expired but we think we can refresh it.");
+                    enginesis.sessionRefresh(_getRefreshToken(), null)
+                    .then(function(enginesisResult) {
+                        debugLog("sessionVerifyGameHash users authentication has been refreshed. " + enginesisResult.toString());
+                    }, function(enginesisError) {
+                        debugLog("sessionVerifyGameHash refresh error " + enginesisError.toString());
+                    })
+                    .catch(function(exception) {
+                        debugLog("sessionVerifyGameHash refresh exception " + exception.toString());
+                    });
+                }
+            }
         }
         if ( ! isValid) {
             debugLog("sessionVerifyGameHash hash does not match. From server: " + cr + ". Computed here: " + hash);
@@ -608,7 +638,7 @@
 
     /**
      * Compute the Enginesis day stamp for the current day. This must match what the server would compute
-     * on the same day.
+     * on the same day in UTC.
      * @returns {Number} The session day stamp value.
      */
     function sessionDayStamp() {
@@ -655,10 +685,10 @@
         userInfo = userInfo || {};
         var loggedInUserInfo = enginesis.loggedInUserInfo || {};
         var siteId = enginesis.siteId;
-        var userId = coerceNotEmpty(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
-        var userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
-        var accessLevel = coerceNotEmpty(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
-        var siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
+        var userId = coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
+        var userName = coerceNotNull(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
+        var accessLevel = coerceNotNull(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
+        var siteUserId = coerceNotNull(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
         var gameId = userInfo.gameId || enginesis.gameId;
         var dayStamp = userInfo.dayStamp || sessionDayStamp();
         var siteMark = 0;
@@ -1862,6 +1892,8 @@
             if (enginesis.assetUploadQueue == null) {
                 enginesis.assetUploadQueue = [];
             }
+            var errorMessage = "";
+            var errorCode = "";
             var uploadAttributes = {
                 target: requestType,
                 token: null,
@@ -1889,19 +1921,15 @@
             };
             fetch(enginesis.siteResources.assetUploadURL, fetchOptions)
             .then(function (response) {
-                var errorCode = '';
-                var errorMessage = '';
                 if (response && response.ok) {
                     var contentType = response.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
-                        try {
-                            var enginesisResponse = response.json()
+                        response.json().then(function(enginesisResponse) {
                             // if response is good, add to queue then schedule follow up to do the upload.
                             if (enginesisResponse != null) {
                                 if (enginesisResponse.status && enginesisResponse.status.success == "1" && enginesisResponse.results) {
                                     uploadAttributes.token = enginesisResponse.results.token;
-                                    uploadAttributes.uploadId = enginesisResponse.results.upload_id;
-                                    uploadAttributes.serverURL = enginesisResponse.results.path + enginesisResponse.results.file;
+                                    uploadAttributes.uploadId = enginesisResponse.results.id;
                                     enginesis.assetUploadQueue.push(uploadAttributes);
                                     _completeFileUpload(uploadAttributes, fileData)
                                     .then(function(enginesisResponse) {
@@ -1910,9 +1938,9 @@
                                         resolve(enginesisResponse);
                                     })
                                     .catch(function(exception) {
-                                        throw(exception);
+                                        errorCode = "SERVICE_ERROR";
+                                        errorMessage = "Error: " + exception.toString() + " Received from service with " + fileName + " with size " + fileSize + ".";
                                     });
-                                    return;
                                 } else {
                                     errorCode = "SERVICE_ERROR";
                                     errorMessage = "Error: " + enginesisResponse.status.extended_info + " Received from service with " + fileName + " with size " + fileSize + ".";
@@ -1921,10 +1949,11 @@
                                 errorCode = "SERVICE_ERROR";
                                 errorMessage = "There was a service error during the upload operation. The support team has been notified.";
                             }
-                        } catch (exception) {
+                        })
+                        .catch(function(jsonParseException) {
                             errorCode = "SERVICE_ERROR";
-                            errorMessage = exception.getErrorMessage();
-                        }
+                            errorMessage = "Unexpected response received from service: " + jsonParseException.toString();
+                        });
                     } else {
                         errorCode = "SERVICE_ERROR";
                         errorMessage = "Unexpected response received from service when requesting upload token.";
@@ -1933,13 +1962,17 @@
                     errorCode = "SERVICE_ERROR";
                     errorMessage = "Error received from service when requesting upload token.";
                 }
-                reject(makeErrorResponse(errorCode, errorMessage, parameters));
+                if (errorCode != "") {
+                    reject(makeErrorResponse(errorCode, errorMessage, parameters));
+                }
             }, function (error) {
+                errorCode = "SERVICE_ERROR";
                 errorMessage = "Network error from service when requesting token. " + error.toString();
-                reject(makeErrorResponse("SERVICE_ERROR", errorMessage, parameters));
+                reject(makeErrorResponse(errorCode, errorMessage, parameters));
             }).catch(function (exception) {
+                errorCode = "SERVICE_ERROR";
                 errorMessage = "Unexpected response received from service when requesting token with " + exception.toString() + ".";
-                reject(makeErrorResponse("SERVICE_ERROR", errorMessage, parameters));
+                reject(makeErrorResponse(errorCode, errorMessage, parameters));
             });
         });
     }
@@ -1954,7 +1987,7 @@
      * @return {Promise} A promise is returned that resolves once the file upload is complete.
      */
     function _completeFileUpload(uploadAttributes, fileData) {
-        return new Promise(function(resolve, relect) {
+        return new Promise(function(resolve, reject) {
             var parameters = {
                 site_id: enginesis.siteId,
                 game_id: enginesis.gameId,
@@ -1963,8 +1996,9 @@
                 file: uploadAttributes.fileName,
                 size: uploadAttributes.fileSize,
                 token: uploadAttributes.token,
+                id: uploadAttributes.uploadId,
                 image: fileData
-            }
+            };
             var fetchOptions = {
                 method: "POST",
                 mode: "cors",
@@ -1980,23 +2014,27 @@
                 if (response && response.ok) {
                     var contentType = response.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
-                        try {
-                            var enginesisResponse = response.json()
+                        response.json().then(function(enginesisResponse) {
                             if (enginesisResponse != null) {
-                                if (enginesisResponse.enginesisResponse && response.status.success == "1") {
+                                if (enginesisResponse.status && enginesisResponse.status.success == "1") {
                                     resolve(enginesisResponse);
                                 } else {
-                                    errorCode = "SERVICE_ERROR";
-                                    errorMessage = "Error: " + enginesisResponse.status.extended_info + " Received from service with " + fileName + " with size " + fileSize + ".";
+                                    errorCode = enginesisResponse.status.message;
+                                    errorMessage = enginesisResponse.status.extended_info;
                                 }
                             } else {
                                 errorCode = "SERVICE_ERROR";
                                 errorMessage = "There was a service error during the upload operation. The support team has been notified.";
                             }
-                        } catch (exception) {
+                            if (errorCode != "") {
+                                reject(makeErrorResponse(errorCode, errorMessage, parameters));
+                            }
+                        })
+                        .catch(function(jsonParseException) {
                             errorCode = "SERVICE_ERROR";
-                            errorMessage = exception.getErrorMessage();
-                        }
+                            errorMessage = jsonParseException.toString();
+                            reject(makeErrorResponse(errorCode, errorMessage, parameters));
+                        });
                     } else {
                         errorCode = "SERVICE_ERROR";
                         errorMessage = "Unexpected response received from service when requesting upload token.";
@@ -2005,7 +2043,9 @@
                     errorCode = "SERVICE_ERROR";
                     errorMessage = "Error received from service when requesting upload token.";
                 }
-                reject(makeErrorResponse(errorCode, errorMessage, parameters));
+                if (errorCode != "") {
+                    reject(makeErrorResponse(errorCode, errorMessage, parameters));
+                }
             }, function (error) {
                 errorMessage = "Network error from service when requesting token. " + error.toString();
                 reject(makeErrorResponse("SERVICE_ERROR", errorMessage, parameters));
@@ -3130,7 +3170,7 @@
     };
 
     /**
-     * Send to Friend is the classic share a game service. It uses the GameDataCreate service but 
+     * Send to Friend is the classic share a game service. It uses the GameDataCreate service but
      * optimized to sharing a game or a user's completed game that she wants to share with a friend.
      * @param {object} sendAttributes Required and optional parameters to send.
      *   * `referrer`: Optional, string to indicate the origin of the request. Usually provide the game_name here but it isn't necessary.
@@ -3143,14 +3183,14 @@
      *   * `name_tag`: Optional, string, additional search tags to assign to the game data.
      *   * `add_to_gallery`: Optional, boolean, 1 to include this in a gallery, 0 to not include in the game gallery.
      *   * `last_score`: Optional, a game score to provide with the game data and report in the user email.
-     *   * `image`: Optional, blob, an image to include in the email message.
+     *   * `game_image`: Optional, blob, an image to include in the email message.
      * @param {function} overRideCallBackFunction
      * @returns {Promise} Resolves when the server request completes.
      */
     enginesis.sendToFriend = function(sendAttributes, overRideCallBackFunction) {
         var errorCode = "";
         var service = "GameDataCreate";
-        if (( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) && (isEmpty(sendAttributes.fromAddress) || isEmpty(sendAttributes.fromName))) {
+        if (( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) && (isEmpty(sendAttributes.from_address) || isEmpty(sendAttributes.from_name))) {
             // if not logged in, fromAddress, fromName must be provided. Otherwise we get it on the server from the logged in user info.
             errorCode = "INVALID_PARAMETER";
         } else if (isEmpty(enginesis.gameId)) {
@@ -3170,12 +3210,13 @@
                 add_to_gallery: sendAttributes.add_to_gallery || 0,
                 last_score: sendAttributes.last_score || 0
             };
+            // If a game image is present, get it on the server first and get it's file ref before sending the complete request.
             if (sendAttributes.game_image) {
                 return new Promise(function(resolve) {
                     _requestFileUpload("gameshare", "game_image.png", sendAttributes.game_image)
                     .then(function(enginesisResponse) {
                         if (enginesisResponse.status && enginesisResponse.status.success == "1") {
-                            requestParameters.user_files = enginesisResponse.results.path + response.results.file;
+                            requestParameters.user_files = enginesisResponse.results.path + enginesisResponse.results.file;
                         }
                         sendRequest(service, requestParameters, overRideCallBackFunction)
                         .then(function(enginesisResponse) {

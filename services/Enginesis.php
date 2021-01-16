@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.6.6');
+    define('ENGINESIS_VERSION', '2.6.7');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -21,16 +21,8 @@ if ( ! defined('SESSION_COOKIE')) {
 abstract class EnginesisNetworks {
     const Enginesis = 1;
     const Facebook = 2;
-    const OpenSocial = 3;
-    const Flux = 4;
-    const AddictingGames = 5;
     const Google = 7;
-    const BeBo = 8;
-    const Friendster = 9;
-    const MySpace = 10;
     const Twitter = 11;
-    const Hi5 = 12;
-    const AOL = 13;
     const Apple = 14;
 }
 
