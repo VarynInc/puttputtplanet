@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.6.7');
+    define('ENGINESIS_VERSION', '2.6.8');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -590,8 +590,8 @@ class Enginesis {
                 $URLParts['host'] = $URLParts['path'];
                 unset($URLParts['path']);
             }
-            if (isset($URLParts[scheme])) {
-                $protocol = $URLParts[scheme];
+            if (isset($URLParts['scheme'])) {
+                $protocol = $URLParts['scheme'];
             }
             $enginesisServiceHost = $URLParts['host'];
         }

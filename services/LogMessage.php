@@ -62,11 +62,20 @@ class LogMessage
             $checkLength = strlen($expectedBaseFolder);
             while ($currentDirectory != '') {
                 $currentFolder = basename($currentDirectory);
-                if (strncmp($currentFolder, $expectedBaseFolder, $checkLength) === 0) {
+                if (strncmp(strtolower($currentFolder), $expectedBaseFolder, $checkLength) === 0) {
                     $serverRootPath = $currentDirectory;
                     break;
+                } elseif (strlen($currentFolder) < 1 || $currentFolder == DIRECTORY_SEPARATOR || $currentFolder == $currentDirectory) {
+                    $serverRootPath = '.';
+                    break;
                 } else {
-                    $currentDirectory = dirname($currentDirectory);
+                    $nextDirectory = dirname($currentDirectory);
+                    if ($nextDirectory == $currentDirectory) {
+                        $serverRootPath = '.';
+                        break;
+                    } else {
+                        $currentDirectory = $nextDirectory;
+                    }
                 }
             }
             if ($serverRootPath == null) {

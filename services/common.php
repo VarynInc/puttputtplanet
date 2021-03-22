@@ -412,7 +412,7 @@ function verifyHashPassword ($password, $hashStoredInDatabase) {
  * @param string is the URL to contact without any query string (use $get_params)
  * @param array GET parameters are key => value arrays
  * @param array POST parameters as a key => value array.
- * @returns string the web page content as a string.
+ * @return string|null the web page content as a string. Returns null if the request failed.
  */
 function getURLContents ($url, $get_params = null, $post_params = null) {
     $post_string = '';
@@ -440,6 +440,10 @@ function getURLContents ($url, $get_params = null, $post_params = null) {
     }
     $page = curl_exec($ch);
     curl_close($ch);
+    if ($page === false) {
+        // the curl call itself failed, usually due to no network or SSL cert failure.
+        $page = null;
+    }
     return $page;
 }
 
@@ -1060,23 +1064,35 @@ function safeForHTML ($string) {
 }
 
 /**
- * Determine if a string has any character of a string of select characters.
- * @param $string string to check
- * @param $selectChars string of individual character to check if contained in $string
+ * Determine if a string has any single character of a string of select characters.
+ *
+ * @param string $string string to check
+ * @param string|Array $selectChars string of individual characters to check if contained in $string.
+ *     If an array of strings, checks each string to determine if the entire string (case sensitive) is contained in $string.
  * @param int $start start position in $string to begin checking, default is the beginning.
  * @param int $length ending position in $string to stop checking, default is the end.
- * @return bool true if at least one character in $selectChars is also in $string, false if none.
+ * @return boolean true if at least one character in $selectChars is also in $string, otherwise
+ *     false if none of $selectChars are in $string.
  */
-function str_contains ($string, $selectChars, $start = 0, $length = 0) {
+function str_contains_char ($string, $selectChars, $start = 0, $length = 0) {
     if ($length == 0) {
         $length = strlen($string);
     }
     if ($start < 0) {
         $start = 0;
     }
-    for ($i = $start; $i < $length; $i ++) {
-        if (strpos($selectChars, $string[$i]) !== false) {
-            return true;
+    if (is_string($selectChars)) {
+        for ($i = $start; $i < $length; $i ++) {
+            if (strpos($selectChars, $string[$i]) !== false) {
+                return true;
+            }
+        }
+    } elseif (is_array($selectChars)) {
+        // TODO: End is not considered
+        for ($i = 0; $i < count($selectChars); $i ++) {
+            if (strpos($string, $selectChars[$i], $start) !== false) {
+                return true;
+            }
         }
     }
     return false;
@@ -1381,13 +1397,13 @@ function MySQLDateToHumanDate ($mysqlDate) {
 function HumanDateToMySQLDate ($humanDate) {
     // Convert mm/dd/yyyy into yyyy-mm-dd
     $dateParts = explode('/', $humanDate, 3);
-    if(strlen($dateParts[0]) < 2) {
+    if (strlen($dateParts[0]) < 2) {
         $dateParts[0] = '0' . $dateParts[0];
     }
-    if(strlen($dateParts[1]) < 2) {
+    if (strlen($dateParts[1]) < 2) {
         $dateParts[1] = '0' . $dateParts[1];
     }
-    if(strlen($dateParts[2]) < 3) {
+    if (strlen($dateParts[2]) < 3) {
         if ((int) $dateParts[2] < 76) { // we are having Y2K issues
             $dateParts[2] = '20' . $dateParts[2];
         } else {
@@ -1722,5 +1738,8 @@ if ($isLoggedIn) {
 } else {
     $userId = 0;
     $authToken = '';
+}
+if (isset($_MAIL_HOSTS)) {
+    ini_set('SMTP', $_MAIL_HOSTS[$serverStage]['host']);
 }
 processTrackBack();
