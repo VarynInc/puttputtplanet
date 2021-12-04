@@ -14,12 +14,12 @@
     <META NAME="Author" content="Varyn, Inc.">
     <META NAME="Copyright" content="� 2010 Varyn, Inc. All rights reserved.">
     <link href="css/main.css" rel="stylesheet" type="text/css">
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Q1Z42K63D7"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-119562011-1"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
         function gtag() { dataLayer.push(arguments); }
         gtag('js', new Date());
-        gtag('config', 'G-Q1Z42K63D7');
+        gtag('config', 'UA-119562011-1');
     </script>
 </head>
 
