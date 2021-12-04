@@ -2,11 +2,11 @@
 /**
  * Enginesis service object for PHP clients. Support for each Enginesis API and additional helper functions.
  * @author: varyn
- * @date: 13-Feb-2016
+ * @since: 13-Feb-2016
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.6.8');
+    define('ENGINESIS_VERSION', '2.6.11');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -56,6 +56,7 @@ class Enginesis {
     private $m_debug;
     private $m_debugFunction;
     private $m_developerKey;
+    private $m_cmsCredentials;
     private $m_languageCode;
     private $m_authToken;
     private $m_authTokenWasValidated;
@@ -97,6 +98,7 @@ class Enginesis {
         $this->m_responseFormat = 'json';
         $this->m_debugFunction = null;
         $this->m_developerKey = $developerKey;
+        $this->m_cmsCredentials = [];
         $this->m_languageCode = 'en';
         $this->m_authToken = null;
         $this->m_authTokenWasValidated = false;
@@ -204,7 +206,7 @@ class Enginesis {
      * @param integer $minLength The minimum length allowed. 0 will allow both null and empty string.
      * @param integer $maxLength The maximum length allowed.
      * @param boolean $allowEmpty If true then allow empty/non-existing string.
-     * @param blloean $allowTags If true then make sure string does not contain HTML tags.
+     * @param boolean $allowTags If true then make sure string does not contain HTML tags.
      * @return boolean
      */
     public function isValidString ($string, $minLength, $maxLength, $allowEmpty = false, $allowTags = true) {
@@ -375,6 +377,16 @@ class Enginesis {
     }
 
     /**
+     * Set the SSO user information.
+     * @param integer Network identifier from `EnginesisNetworks`
+     * @param string site user id from SSO
+     */
+    public function setSiteUserId ($networkId, $siteUserId) {
+        $this->m_siteUserId = $siteUserId;
+        $this->m_networkId = $networkId;
+    }
+
+    /**
      * Return the language code.
      * @return string
      */
@@ -401,6 +413,117 @@ class Enginesis {
         } else {
             return $this->sessionUserInfoGet();
         }
+    }
+
+    /**
+     * Set the CMS key required for secure transactions.
+     * @param string $key
+     */
+    public function setCMSKey($cmsKey, $userName = '', $password = '') {
+        if (is_array($cmsKey)) {
+            $this->m_cmsCredentials['cms_key'] = $cmsKey['cms_key'];
+            $this->m_cmsCredentials['user_name'] = $cmsKey['user_name'];
+            $this->m_cmsCredentials['password'] = $cmsKey['password'];
+        } else {
+            $this->m_cmsCredentials['cms_key'] = $cmsKey;
+            $this->m_cmsCredentials['user_name'] = $userName;
+            $this->m_cmsCredentials['password'] = $password;
+        }
+    }
+
+    /**
+     * Return the private authentication token to be used for server-to-server secured trancactions.
+     * Any secured service should use this function to get the CMS user authentication token. The
+     * setter function `setCMSKey()` must be called before this in order to set the required credentials.
+     *
+     * @return string Authentication token. An empty string is returned if there was an error.
+     */
+    private function getCMSAuthToken() {
+        $errorCode = EnginesisErrors::NO_ERROR;
+        $errorMessage = '';
+        $auth = null;
+        $updated = false;
+        $timeNow = time();
+        $secretFile = $this->m_serverPaths['DATA'] . '.enginesis_auth.json';
+        $authDefault = [
+            'user_id' => 0,
+            'user_name' => 'user',
+            'access_level' => 0,
+            'auth_token' => '',
+            'auth_token_expires' => '',
+            'refresh_token' => '',
+            'refresh_token_expires' => '',
+            'date_saved' => ''
+        ];
+
+        // load existing file
+        if (file_exists($secretFile)) {
+            $contents = file_get_contents($secretFile);
+            $auth = json_decode($contents);
+            // TODO: verify the loaded file was not tampered/spoofed.
+            // TODO: Verify this information matches the set CMS user.
+        }
+        if ($auth == null) {
+            $auth = $authDefault;
+        }
+        // determine if existing token is still valid
+        $authTokenExpireTime = strtotime($auth['auth_token_expires']);
+        if ($authTokenExpireTime === false || $timeNow > $authTokenExpireTime) {
+            // auth token is expired, determine if refresh token is valid
+            $refreshTokenExpireTime = strtotime($auth['refresh_token_expires']);
+            if ($refreshTokenExpireTime === false || $timeNow > $refreshTokenExpireTime) {
+                // need to do a full login, we expect the parameters to be passed in
+                $CMSAccountCredentials = $this->m_cmsCredentials;
+//                echo("CMS creds " . json_encode($CMSAccountCredentials));
+                if (empty($CMSAccountCredentials) || empty($CMSAccountCredentials['user_name']) || empty($CMSAccountCredentials['password'])) {
+                    $errorCode = EnginesisErrors::INVALID_LOGIN;
+                    $errorMessage = 'User login failed, check user credentials.';
+                } else {
+                    $userInfo = $this->adminUserLogin($CMSAccountCredentials['user_name'], $CMSAccountCredentials['password']);
+                    if ($userInfo == null) {
+                        $errorCode = EnginesisErrors::INVALID_LOGIN;
+                        $errorMessage = 'User login failed, check user credentials.';
+                    } else {
+                        $updated = true;
+                        $auth['user_id'] = intval($userInfo->user_id, 10);
+                        $auth['user_name'] = $userInfo->user_name;
+                        $auth['access_level'] = intval($userInfo->access_level, 10);
+                        $auth['auth_token'] = $userInfo->authtok;
+                        $auth['auth_token_expires'] = $userInfo->session_expires;
+                        $auth['refresh_token'] = $userInfo->refresh_token;
+                        $auth['refresh_token_expires'] = $userInfo->expires;
+                    }
+                }
+            } else {
+                // need to do a session refresh
+                $userInfo = $this->adminSessionRefresh($auth['user_id'], $auth['refresh_token']);
+                if ($userInfo == null) {
+                    $errorCode = EnginesisErrors::INVALID_TOKEN;
+                    $errorMessage = 'Authentication token invalid or expired and refresh token invalid or expired.';
+                } else {
+                    $updated = true;
+                }
+            }
+        } else {
+            // assume if token not expired, then everything else is good.
+            echo("All good\n");
+        }
+        //
+        // if token is new/refreshed, save $auth
+        if ($updated) {
+            $auth['date_saved'] = date('Y-m-d H:i:s', $timeNow);
+            $contents = json_encode($auth);
+            $writeStatus = file_put_contents($secretFile, $content);
+            if ($writeStatus === false) {
+                $errorCode = EnginesisErrors::FILE_WRITE_FAILED;
+                $errorMessage = 'Unable to store authentication on the server, check file privs.';
+            }
+        }
+        if ($errorCode != EnginesisErrors::NO_ERROR) {
+            $this->setLastError($errorCode, $errorMessage);
+            $this->debugInfo("getCMSAuthToken error $errorCode:$errorMessage result " . json_encode($auth), __FILE__, __LINE__);
+        }
+        return $auth['auth_token'];
     }
 
     /**
@@ -1058,7 +1181,34 @@ class Enginesis {
         }
         if ($userInfo === null) {
             $this->debugInfo("BAD UserInfo from sessionRestoreFromResponse " . json_encode($serverResponse), __FILE__, __LINE__);
-            echo("BAD UserInfo from sessionRestoreFromResponse " . json_encode($serverResponse));
+        }
+        return $userInfo;
+    }
+
+    /**
+     * Server response callback from a adminUserLogin or adminSessionRefresh, validate the
+     * server response and pass back the updated session information.
+     */
+    private function adminSessionResponse($serverResponse) {
+        $userInfo = null;
+        if (is_array($serverResponse) && count($serverResponse) > 0) {
+            $userInfo = $serverResponse[0];
+            if ($userInfo && isset($userInfo->authtok)) {
+                if (! isset($userInfo->user_id)) {
+                    $userData = $this->authTokenDecrypt($userInfo->authtok);
+                    if ($userData !== null) {
+                        $userInfo->site_id = $userData['siteid'];
+                        $userInfo->user_id = $userData['userid'];
+                        $userInfo->user_name = $userData['username'];
+                        $userInfo->site_user_id = $userData['siteuserid'];
+                        $userInfo->access_level = $userData['accesslevel'];
+                        $userInfo->network_id = $userData['networkid'];
+                    }
+                }
+            }
+        }
+        if ($userInfo === null) {
+            $this->debugInfo("BAD UserInfo from adminSessionResponse " . json_encode($serverResponse), __FILE__, __LINE__);
         }
         return $userInfo;
     }
@@ -1345,11 +1495,12 @@ class Enginesis {
 
     /**
      * callServerAPI: Make an Enginesis API request over the WWW
-     * @param $serviceName {string} is the API service to call.
-     * @param $parameters {array|null} key => value array of parameters e.g. array('site_id' => 100);
-     * @return {object} response from server based on requested response format.
+     * @param string $serviceName is the API service to call.
+     * @param Array|null $parameters Key => value array of parameters e.g. array('site_id' => 100);
+     * @param boolean $isSecure Set to true if this is a secured request. Secured requests require additional set up.
+     * @return object Response from server based on requested response format.
      */
-    private function callServerAPI ($serviceName, $parameters) {
+    private function callServerAPI ($serviceName, $parameters, $isSecure = false) {
         $headers = [];
         $parameters = $this->serverParamObjectMake($serviceName, $parameters);
         $response = $parameters['response'];
@@ -1362,13 +1513,31 @@ class Enginesis {
             unset($parameters['developer_key']);
             unset($parameters['apikey']);
         }
-        $authenticationToken = $this->m_authToken;
-        if ($authenticationToken != null && $this->m_authTokenWasValidated) {
-            // Move authentication token to header so it is not sent in body
-            $headers[] = 'Authentication: Bearer ' . $authenticationToken;
-            // weed it out of passed in parameters if it is there so it doesnt appear in logs
-            unset($parameters['authtok']);
-            unset($parameters['token']);
+        if ($isSecure) {
+            if ($serviceName === 'CmsUserLogin') {
+                $authenticationToken = $this->m_cmsCredentials['cms_key'];
+            } else {
+                $authenticationToken = $this->getCMSAuthToken();
+            }
+            if ( ! empty($this->m_cmsCredentials) && ! empty($authenticationToken)) {
+                $headers[] = 'X-CMSKey: ' . $this->m_cmsCredentials['cms_key'];
+                $headers[] = 'Authentication: Bearer ' . $authenticationToken;
+            } else {
+                // invalid request to a secured service
+                $errorInfo = 'Invalid secure transaction, missing CMS key or CMS admin user authentication.';
+                $this->debugCallback($errorInfo, __FILE__, __LINE__);
+                $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
+                return $contents;
+            }
+        } else {
+            $authenticationToken = $this->m_authToken;
+            if ($authenticationToken != null && $this->m_authTokenWasValidated) {
+                // Move authentication token to header so it is not sent in body
+                $headers[] = 'Authentication: Bearer ' . $authenticationToken;
+                // weed it out of passed in parameters if it is there so it doesnt appear in logs
+                unset($parameters['authtok']);
+                unset($parameters['token']);
+            }
         }
         $isLocalhost = serverStage() == '-l';
         $url = $this->m_serviceEndPoint;
@@ -1389,12 +1558,11 @@ class Enginesis {
                 curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 );
             }
             if ($setSSLCertificate) {
-                $certPath = $this->m_serverPaths['PRIVATE'] . 'cacert.pem';
-                if (file_exists($certPath)) {
-                    curl_setopt($ch, CURLOPT_CAINFO, $certPath);
-                    curl_setopt($ch, CURLOPT_CAPATH, $certPath);
+                $sslCertificate = $this->m_serverPaths['PRIVATE'] . 'cacert.pem';
+                if (file_exists($sslCertificate)) {
+                    curl_setopt($ch, CURLOPT_CAINFO, $sslCertificate);
                 } else {
-                    $this->debugCallback("callServerAPI Cant locate private certs $certPath", __FILE__, __LINE__);
+                    $this->debugCallback("callServerAPI Cant locate private cert $sslCertificate", __FILE__, __LINE__);
                 }
             }
             curl_setopt($ch, CURLOPT_POST, 1);
@@ -1496,12 +1664,15 @@ class Enginesis {
                     }
                 } else {
                     $statusMessage = EnginesisErrors::SERVER_RESPONSE_NOT_VALID;
+                    $extendedInfo = 'Received a response but could not parse it.';
                 }
             } else {
                 $statusMessage = EnginesisErrors::SERVICE_ERROR;
+                $extendedInfo = 'The server responded but there were no results to this request.';
             }
         } else {
             $statusMessage = EnginesisErrors::SERVER_DID_NOT_REPLY;
+            $extendedInfo = 'The server did not respond to the request.';
         }
         return $resultSet;
     }
@@ -1555,6 +1726,33 @@ class Enginesis {
             $site = $results[0];
         }
         return $site;
+    }
+
+    /**
+     * If you know what you are doing you can call a service directly providing the service enpoint
+     * and the required parameter. No client-side checking is done.
+     *
+     * @param string Service endpoint to call.
+     * @param Array Key/value parameters required by the service.
+     * @return Array Array of rows if succeeded, null when failed. If failed, call `getLastError()`.
+     */
+    public function callService ($service, $parameters) {
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * If you know what you are doing you can call a secured service directly. Secured service calls
+     * require a CMS user to be logged in and set the CMS transaction key (setCMSKey()).
+     *
+     * @param string Service endpoint to call.
+     * @param Array Key/value parameters required by the service.
+     * @return Array Array of rows if succeeded, null when failed. If failed, call `getLastError()`.
+     */
+    public function callSecureService ($service, $parameters) {
+        $isSecure = true;
+        $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -1637,7 +1835,36 @@ class Enginesis {
     }
 
     /**
-     * Login a user by calling the Enginesis function and wait for the response. If the user is successfully
+     * Call Enginesis SessionRefresh to exchange the long-lived refresh token for a new authentication token. Usually you
+     * call this when you attempt to call a service and it replied with TOKEN_EXPIRED.
+     * @param integer $user_id The CMS user id.
+     * @param string refreshToken The CMS user's refresh token.
+     * @returns Object The CMS user object if successful, null if failed.
+     */
+    private function adminSessionRefresh ($user_id, $refreshToken) {
+        $service = 'SessionRefresh';
+        $isSecure = true;
+        $userInfo = null;
+        $this->m_lastError = Enginesis::noError();
+        // When refreshing the token we need to remind the server who the user is
+        $parameters = [
+            'refresh_token' => $refreshToken,
+            'logged_in_user_id' => $user_id,
+            'game_id' => 0,
+            'gamekey' => ''
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
+        $results = $this->setLastErrorFromResponse($enginesisResponse);
+        if ($results != null) {
+            $userInfo = $this->adminSessionResponse($results);
+        } else {
+            $errorCode = $this->getLastErrorCode();
+        }
+        return $userInfo;
+    }
+
+    /**
+     * Log a user in by calling the Enginesis function and wait for the response. If the user is successfully
      * logged in then save the session cookie that allows us to converse with the server without logging in each time.
      * @param $userName: string the user's name or email address
      * @param $password: string the user's password
@@ -1654,6 +1881,33 @@ class Enginesis {
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null) {
             $userInfo = $this->sessionRestoreFromResponse($results);
+        }
+        return $userInfo;
+    }
+
+    /**
+     * Log in a CMS admin user. Admin users sessions are used for secure transactions with the server, are not intended
+     * to be used by users but rather the system administrator who is running the server. This is not to be called by
+     * client-side code. Successful login will persist the CMS user admin session data for subsequent secured calls
+     * and refresh the token when required.
+     *
+     * @param $userName: string the user's name or email address
+     * @param $password: string the user's password
+     * @return object: null if login fails, otherwise returns the user info object.
+     */
+    private function adminUserLogin ($userName, $password) {
+        $userInfo = null;
+        $isSecure = true;
+        $service = 'CmsUserLogin';
+        $parameters = [
+            'user_name' => $userName,
+            'password' => $password
+        ];
+//        echo("callServerAPI $service $userName, $password\n");
+        $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
+        $results = $this->setLastErrorFromResponse($enginesisResponse);
+        if ($results != null) {
+            $userInfo = $this->adminSessionResponse($results);
         }
         return $userInfo;
     }
@@ -1948,7 +2202,7 @@ class Enginesis {
      * @param $security_question_id int
      * @param $security_question string
      * @param $security_answer string
-     * @return object: null if all acceptable. key/value pairs that we think are unacceptable. key is the field in error, value is the error message.
+     * @return array|null Null if all acceptable, otherwise an array of key/value pairs that we think are unacceptable. key is the field in error, value is the error message.
      */
     public function registeredUserSecurityValidation ($user_id, $mobile_number, $security_question_id, $security_question, $security_answer) {
         $errors = [];
@@ -2109,6 +2363,40 @@ class Enginesis {
     public function userResetPassword () {
         $service = 'RegisteredUserResetPassword';
         $parameters = [];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * Start a user delete request. Must be logged in as a CMS user to do this.
+     * @param string confirmation code.
+     * @return Array Array of rows if succeeded, null when failed.
+     */
+    public function registeredUserDelete ($userId) {
+        $service = 'RegisteredUserDelete';
+        $isSecure = true;
+        if ($userId < 9999) {
+            $userId = $this->m_userId;
+        }
+        $parameters = [
+            'user_id_to_delete' => $userId,
+            'site_user_id' => $this->m_siteUserId,
+            'network_id' => $this->m_networkId
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * Get information about a user deletion request.
+     * @param string confirmation code.
+     * @return Array Array of rows if succeeded, null when failed.
+     */
+    public function registeredUserDeleteGet ($confirmationCode) {
+        $service = 'RegisteredUserDeleteGet';
+        $parameters = [
+            'ccode' => $confirmationCode
+        ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         return $this->setLastErrorFromResponse($enginesisResponse);
     }
