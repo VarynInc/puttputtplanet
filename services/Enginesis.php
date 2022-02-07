@@ -513,7 +513,7 @@ class Enginesis {
         if ($updated) {
             $auth['date_saved'] = date('Y-m-d H:i:s', $timeNow);
             $contents = json_encode($auth);
-            $writeStatus = file_put_contents($secretFile, $content);
+            $writeStatus = file_put_contents($secretFile, $contents);
             if ($writeStatus === false) {
                 $errorCode = EnginesisErrors::FILE_WRITE_FAILED;
                 $errorMessage = 'Unable to store authentication on the server, check file privs.';
@@ -567,11 +567,11 @@ class Enginesis {
     /**
      * Return the domain name and TLD only (remove server name, protocol, anything else) e.g. this function
      * converts http://www.games.com into games.com or http://services.games-q.com into games-q.com
-     * @param string|null $proposedServerName a proposed domain. If null, the current domain.
+     * @param string $proposedServerName a proposed domain. If empty, use the current domain.
      * @return string The last two components of the proposed domain.
      */
     public function serverTail($proposedServerName = '') {
-        if (strlen($proposedServerName) == 0) {
+        if (empty($proposedServerName)) {
             $proposedServerName = $this->getServerName();
         }
         if ($proposedServerName != 'localhost') {
@@ -1143,7 +1143,7 @@ class Enginesis {
                 $this->debugInfo("decoded cookie for SESSION_USERINFO " . json_encode($userInfo), __FILE__, __LINE__);
             } catch (Exception $e) {
                 $this->setLastError('CANNOT_GET_USERINFO', 'sessionUserInfoGet could not get cookie: ' . $e->getMessage());
-                $this->debugInfo('sessionUserInfoGet fails: ' . json_decode($this->m_lastError), __FILE__, __LINE__);
+                $this->debugInfo('sessionUserInfoGet fails: ' . json_encode($this->m_lastError), __FILE__, __LINE__);
             }
         } else {
             $this->debugInfo("no cookie for SESSION_USERINFO, not sure if you were expecting one", __FILE__, __LINE__);
@@ -1230,10 +1230,10 @@ class Enginesis {
         $this->m_isLoggedIn = false;
         $this->m_refreshedUserInfo = null;
         if ( ! headers_sent()) {
-            if (setcookie(SESSION_COOKIE, null, time() - $sessionExpireTime, '/', $this->sessionCookieDomain()) === false) {
+            if (setcookie(SESSION_COOKIE, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain()) === false) {
                 $rc = 'CANNOT_SET_SESSION';
             }
-            setcookie(SESSION_USERINFO, null, time() - $sessionExpireTime, '/', $this->sessionCookieDomain());
+            setcookie(SESSION_USERINFO, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain());
         }
         $_COOKIE[SESSION_COOKIE] = null;
         $_COOKIE[SESSION_USERINFO] = null;
@@ -1305,7 +1305,7 @@ class Enginesis {
      * @param string A byte array that was base-64 encoded with `base64URLEncode($input)`.
      * @return string The input string decoded.
      */
-    private function base64URLDecode($input) {
+    private function base64URLDecode($data) {
         return base64_decode(strtr($data, ['-' => '+', '_' => '/', '~' => '='])); // '-_~', '+/='));
     }
 
@@ -1314,7 +1314,7 @@ class Enginesis {
      * @param string A string or a byte array.
      * @return string The input string encoded and the unsafe characters are changed to `+` => `-` and `/` => `_`.
      */
-    private function base64URLEncode($input) {
+    private function base64URLEncode($data) {
         return strtr(base64_encode($data), ['+' => '-', '/' => '_', '=' => '~']); // '+/=', '-_~');
     }
 
@@ -1384,7 +1384,7 @@ class Enginesis {
         echo("<p>Site-user-id: $this->m_siteUserId</p>");
         echo("<p>Network-id: $this->m_networkId</p>");
         echo("<p>User logged in: " . ($this->m_isLoggedIn ? 'YES' : 'NO') . "</p>");
-        echo("<p>Last error: " . ($this->m_lastError ? implode(', ', $this->m_lastError) : 'null') . "</p>");
+        echo("<p>Last error: " . ($this->m_lastError ? json_encode($this->m_lastError) : 'null') . "</p>");
         var_dump($this->m_refreshedUserInfo);
     }
 
@@ -1568,9 +1568,10 @@ class Enginesis {
             curl_setopt($ch, CURLOPT_POST, 1);
             curl_setopt($ch, CURLOPT_POSTFIELDS, $this->encodeURLParams($parameters));
             $contents = curl_exec($ch);
-            $succeeded = $contents !== false && strlen($contents) > 0;
+            $curlError = curl_errno($ch);
+            $succeeded = $curlError != 0 || ($contents !== false && strlen($contents) > 0);
             if ( ! $succeeded) {
-                $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. ' . curl_error($ch);
+                $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. cURL error ' .$curlError . ': ' . curl_error($ch);
                 $this->debugCallback($errorInfo, __FILE__, __LINE__);
                 $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
             }
