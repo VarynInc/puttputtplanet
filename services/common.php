@@ -484,8 +484,8 @@ function getURLContents ($url, $get_params = null, $post_params = null) {
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
         curl_setopt($ch, CURLOPT_DNS_CACHE_TIMEOUT, 600);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Varyn ' . VARYN_VERSION);
-        curl_setopt($ch, CURLOPT_REFERER, 'https://varyn.com/');
+        curl_setopt($ch, CURLOPT_USERAGENT, getSiteName() . ' ' . getServiceVersion());
+        curl_setopt($ch, CURLOPT_REFERER, getCurrentDomain());
         if ($post_string != '') {
             curl_setopt($ch, CURLOPT_POST, 1);
             curl_setopt($ch, CURLOPT_POSTFIELDS, $post_string);
@@ -596,6 +596,28 @@ function verifyStage($includePassedTests = false) {
 }
 
 /**
+ * Get the full HTTP referrer domain we are currently running on. It should return
+ * a http protocol with service domain with its current stage.
+ * @return string Server domain.
+ */
+function getCurrentDomain()
+{
+    return
+        'http' . (isset($_SERVER['HTTPS']) ? 's' : '')
+        . '://'
+        . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN)
+        . '/';
+}
+
+/**
+ * Return the name of the current site.
+ * @return string Site name.
+ */
+function getSiteName() {
+    return ENGINESIS_SITE_NAME;
+}
+
+/**
  * Return the host name of the server we are running on. e.g. www.enginesis-q.com
  * @return string server host name only, e.g. www.enginesis.com.
  */
@@ -610,10 +632,10 @@ function serverName () {
 /**
  * Return the domain name and TLD only (remove server name, protocol, anything else) e.g. this function
  * converts http://www.games.com into games.com or http://www.games-q.com into games-q.com
- * @param null $serverName
+ * @param string $serverName
  * @return null|string
  */
-function serverTail ($serverName = null) {
+function serverTail ($serverName = '') {
     $domain = '';
     $tld = '';
     if (strlen($serverName) == 0) {
@@ -667,12 +689,12 @@ function domainDropServer ($targetHost) {
 
 /**
  * Transform the host name into the matching stage-qualified host name requested. For example, if we are currently on
- * www.enginesis-q.com and the $targetPlatform is -l, return www.enginesis-l.com.
- * @param string $targetPlatform one of -l, -d, -x, -q or '' for live.
+ * www.enginesis-q.com and the $targetStage is -l, return www.enginesis-l.com.
+ * @param string $targetStage one of -l, -d, -x, -q or '' for live.
  * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
  * @return string The requalified host name.
  */
-function domainForTargetPlatform ($targetPlatform, $hostName = null) {
+function domainForTargetStage($targetStage, $hostName = null) {
     if (empty($hostName)) {
         $hostName = serverName();
     }
@@ -683,7 +705,7 @@ function domainForTargetPlatform ($targetPlatform, $hostName = null) {
     } else {
         $domain = substr($hostName, 0, $lastDot);
         $tld = substr($hostName, $lastDot + 1);
-        $domain = preg_replace('/-[ldqx]$/', '', $domain) . $targetPlatform . '.' . $tld;
+        $domain = preg_replace('/-[ldqx]$/', '', $domain) . $targetStage . '.' . $tld;
     }
     return $domain;
 }

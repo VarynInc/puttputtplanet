@@ -594,12 +594,12 @@ class Enginesis {
 
     /**
      * Transform the host name into the matching stage-qualified host name requested. For example, if we are currently on
-     * www.enginesis-q.com and the $targetPlatform is -l, return www.enginesis-l.com.
-     * @param string $targetPlatform one of -l, -d, -x, -q or '' for live.
+     * www.enginesis-q.com and the $targetStage is -l, return www.enginesis-l.com.
+     * @param string $targetStage one of -l, -d, -x, -q or '' for live.
      * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
      * @return string The requalified host name.
      */
-    public function domainForTargetPlatform($targetPlatform, $hostName = null) {
+    public function domainForTargetStage($targetStage, $hostName = null) {
         if (empty($hostName)) {
             $hostName = $this->getServerName();
         }
@@ -611,7 +611,7 @@ class Enginesis {
         } else {
             $domain = substr($hostName, 0, $lastDot);
             $tld = substr($hostName, $lastDot + 1);
-            $domain = preg_replace('/-[ldqx]$/', '', $domain) . $targetPlatform . '.' . $tld;
+            $domain = preg_replace('/-[ldqx]$/', '', $domain) . $targetStage . '.' . $tld;
         }
         return $domain;
     }
@@ -704,7 +704,7 @@ class Enginesis {
             if ($this->m_siteId !== 100) {
                 $enginesisServiceHost .= $defaultEnginesisService . '.';
             }
-            $enginesisServiceHost .= $this->serverTail($this->domainForTargetPlatform($enginesisServer));
+            $enginesisServiceHost .= $this->serverTail($this->domainForTargetStage($enginesisServer));
         } else {
             // Caller can provide a specific server we should converse with
             $URLParts = parse_url($enginesisServer);

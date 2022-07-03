@@ -10,6 +10,7 @@ define('LOGFILE_PREFIX', 'enginesis');
 define('SITE_SESSION_COOKIE', 'enguser');
 define('ENGINESIS_SITE_NAME', 'Enginesis');
 define('ENGINESIS_SITE_ID', 100);
+define('ENGINESIS_SITE_DOMAIN', 'enginesis.com');
 define('DEBUG_ACTIVE', false);
 define('DEBUG_SESSION', false);
 define('PUBLISHING_MASTER_PASSWORD', '');
