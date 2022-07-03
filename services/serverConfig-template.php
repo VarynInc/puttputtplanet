@@ -6,7 +6,7 @@
  * Date: Feb-13-2016
  */
 date_default_timezone_set('America/New_York');
-define('LOGFILE_PREFIX', 'enginesis_php_');
+define('LOGFILE_PREFIX', 'enginesis');
 define('SITE_SESSION_COOKIE', 'enguser');
 define('ENGINESIS_SITE_NAME', 'Enginesis');
 define('ENGINESIS_SITE_ID', 100);
@@ -16,7 +16,8 @@ define('PUBLISHING_MASTER_PASSWORD', '');
 define('REFRESH_TOKEN_KEY', '');
 define('ADMIN_ENCRYPTION_KEY', '');
 define('COREG_TOKEN_KEY', '');
-define('ENGINESIS_DEVELOPER_TOKEN', '');
+define('ENGINESIS_DEVELOPER_API_KEY', '');
+define('ENGINESIS_CMS_API_KEY', '');
 define('SESSION_REFRESH_HOURS', 4380);     // refresh tokens are good for 6 months
 define('SESSION_REFRESH_INTERVAL', 'P6M'); // refresh tokens are good for 6 months
 define('SESSION_AUTHTOKEN', 'authtok');

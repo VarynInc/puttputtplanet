@@ -796,10 +796,10 @@ class Enginesis {
 
     /**
      * Figure out which domain we want to save the cookie under.
-     * @param null $serverName
+     * @param string $serverName
      * @return null|string
      */
-    private function sessionCookieDomain ($serverName = null) {
+    private function sessionCookieDomain ($serverName = '') {
         $newDomain = null;
         $domain = $this->serverTail($serverName);
         if (strlen($domain) > 0) {
@@ -866,7 +866,7 @@ class Enginesis {
         // PHP timestamps are in seconds, JavaScript timestamps are in milliseconds. :(
         $timestampJS = $timestamp * 1000;
         $refreshTokenJSON = '{"refresh_token":"'. $refreshToken . '","timestamp":"' . $timestampJS . '"}';
-        setcookie(REFRESH_COOKIE, $refreshTokenJSON, $timestamp + (365 * 24 * 60 * 60), '/', $this->sessionCookieDomain());
+        setcookie(REFRESH_COOKIE, $refreshTokenJSON, $timestamp + (365 * 24 * 60 * 60), '/', $this->sessionCookieDomain(), true, false);
         return $this->m_refreshToken;
     }
 
@@ -1073,7 +1073,7 @@ class Enginesis {
         $errorLevel = error_reporting(); // turn off warnings so we don't generate crap in the output stream. If we don't do this fucking php writes an error and screws up the output stream. (I cant get the try/catch to work without it)
         error_reporting($errorLevel & ~E_WARNING);
         try {
-            if ( ! setcookie(SESSION_COOKIE, $authenticationToken, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $this->sessionCookieDomain())) {
+            if ( ! setcookie(SESSION_COOKIE, $authenticationToken, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $this->sessionCookieDomain(), true, false)) {
                 $rc = 'CANNOT_SET_SESSION';
                 $this->setLastError($rc, 'sessionSave setcookie failed');
                 $this->debugInfo("Failed to save the engsession cookie", __FILE__, __LINE__);
@@ -1113,7 +1113,7 @@ class Enginesis {
         error_reporting($errorLevel & ~E_WARNING);
         try {
             $userInfoJSON = json_encode($userInfo);
-            if (setcookie(SESSION_USERINFO, $userInfoJSON, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $this->sessionCookieDomain()) === false) {
+            if (setcookie(SESSION_USERINFO, $userInfoJSON, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $this->sessionCookieDomain(), true, false) === false) {
                 $rc = 'CANNOT_SAVE_USERINFO';
                 $this->setLastError($rc, 'sessionUserInfoSave setcookie failed');
             }
@@ -1230,10 +1230,10 @@ class Enginesis {
         $this->m_isLoggedIn = false;
         $this->m_refreshedUserInfo = null;
         if ( ! headers_sent()) {
-            if (setcookie(SESSION_COOKIE, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain()) === false) {
+            if (setcookie(SESSION_COOKIE, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain(), true, false) === false) {
                 $rc = 'CANNOT_SET_SESSION';
             }
-            setcookie(SESSION_USERINFO, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain());
+            setcookie(SESSION_USERINFO, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain(), true, false);
         }
         $_COOKIE[SESSION_COOKIE] = null;
         $_COOKIE[SESSION_USERINFO] = null;
@@ -1969,7 +1969,7 @@ class Enginesis {
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         $this->m_refreshToken = null;
-        setcookie(REFRESH_COOKIE, null, time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain());
+        setcookie(REFRESH_COOKIE, null, time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain(), true, false);
         $this->sessionClear();
         return $results != null;
     }

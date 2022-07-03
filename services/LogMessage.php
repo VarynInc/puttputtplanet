@@ -262,7 +262,7 @@ class LogMessage
         if (isset($loggingConfiguration['log_file_prefix'])) {
             $this->_logFilePrefix = $loggingConfiguration['log_file_prefix'];
         } else {
-            $this->_logFilePrefix = LogMessage::_defaultFilePrefix() . $stage . '_php_';
+            $this->_logFilePrefix = LogMessage::_defaultFilePrefix() . $stage . '-php-';
         }
         if (isset($loggingConfiguration['log_file_path'])) {
             $this->_logFilePath = $loggingConfiguration['log_file_path'];
@@ -293,27 +293,27 @@ class LogMessage
         if (isset($loggingConfiguration['log_active'])) {
             $this->_active = $this->castToBoolean($loggingConfiguration['log_active']);
         }
-        if (isset($loggingConfiguration['log_level'])) { //
+        if (isset($loggingConfiguration['log_level'])) {
             $this->_logLevel = $loggingConfiguration['log_level'];
         }
-        if (isset($loggingConfiguration['log_to_output'])) { //
+        if (isset($loggingConfiguration['log_to_output'])) {
             $this->_logToOutput = $this->castToBoolean($loggingConfiguration['log_to_output']);
         }
-        if (isset($loggingConfiguration['log_to_url'])) { //
+        if (isset($loggingConfiguration['log_to_url'])) {
             $this->_logToURL = $loggingConfiguration['log_to_url'];
         }
-        if (isset($loggingConfiguration['log_to_socket'])) { //
+        if (isset($loggingConfiguration['log_to_socket'])) {
             $this->_logToSocket = $loggingConfiguration['log_to_socket'];
         }
-        if (isset($loggingConfiguration['log_file_prefix'])) { //
+        if (isset($loggingConfiguration['log_file_prefix'])) {
             $this->_logFilePrefix = $loggingConfiguration['log_file_prefix'];
             $logToPathChanged = true;
         }
-        if (isset($loggingConfiguration['log_file_path'])) { //
+        if (isset($loggingConfiguration['log_file_path'])) {
             $this->_logFilePath = $loggingConfiguration['log_file_path'];
             $logToPathChanged = true;
         }
-        if (isset($loggingConfiguration['log_to_file'])) { //
+        if (isset($loggingConfiguration['log_to_file'])) {
             $this->_logToFile = $this->castToBoolean($loggingConfiguration['log_to_file']);
             $logToPathChanged = true;
         }
@@ -331,7 +331,7 @@ class LogMessage
      * @return array
      */
     public static function allConfigurationOptions() {
-        $configuration = array(
+        $configuration = [
             'log_active' => true,
             'log_level' => LogMessageLevel::All,
             'log_to_output' => true,
@@ -341,7 +341,7 @@ class LogMessage
             'log_to_url' => 'http://enginesis-l.com/procs/log.php',
             'log_to_socket' => 8001,
             'stage' => serverStage()
-        );
+        ];
         return $configuration;
     }
 

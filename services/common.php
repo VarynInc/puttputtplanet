@@ -700,7 +700,7 @@ function serverStage($hostName = null) {
         $hostName = serverName();
     }
     if (preg_match('/-[dlqx]\./i', $hostName, $matchedStage)) {
-        $targetPlatform = substr($matchedStage[0], 0, 2);
+        $targetPlatform = strtolower(substr($matchedStage[0], 0, 2));
     }
     return $targetPlatform;
 }
