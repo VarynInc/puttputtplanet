@@ -4,7 +4,7 @@
  * @author: jf
  * @date: 9/2/2017
  */
- 
+
 abstract class LogMessageLevel {
     const None = 0;
     const Info = 1;

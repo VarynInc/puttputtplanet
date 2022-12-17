@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.6.12');
+    define('ENGINESIS_VERSION', '2.6.13');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -50,6 +50,8 @@ class Enginesis {
     private $m_networkId;
     private $m_userName;
     private $m_userAccessLevel;
+    private $m_favoriteGames;
+    private $m_favoriteGamesNextCheck;
     private $m_stage;
     private $m_syncId;
     private $m_responseFormat;
@@ -79,7 +81,7 @@ class Enginesis {
      * @param string $debugFunction A function to call for debug logging, defaults to NULL. What is the signature of this function?
      */
     public function __construct ($siteId, $enginesisServer, $developerKey, $debugFunction = null) {
-        // TODO: Should initialize to false and only set when requested.
+        // @todo: Should initialize to false and only set when requested.
         $this->m_debug = true;
         $this->m_server = $this->serverName();
         $this->m_stage = $this->serverStage($this->m_server);
@@ -90,6 +92,8 @@ class Enginesis {
         $this->m_siteUserId = null;
         $this->m_networkId = 1;
         $this->m_userAccessLevel = 0;
+        $this->m_favoriteGames = null;
+        $this->m_favoriteGamesNextCheck = null;
         $this->m_isLoggedIn = false;
         $this->m_refreshedUserInfo = null;
         $this->m_syncId = 0;
@@ -283,7 +287,7 @@ class Enginesis {
      * In order to provide some flexibility with dates, our API will accept a PHP date, a Unix timestamp,
      * or a date string. This function will try to figure our what date was provided and convert what ever
      * it is into a valid MySQL date string.
-     * @param $date mixed One of PHP Date, integer, a string, or null.
+     * @param date|integer|string $date One of PHP Date, integer, a string, or null.
      * @return string a valid MySQL date
      */
     public function mySQLDate($date = null) {
@@ -432,7 +436,7 @@ class Enginesis {
     }
 
     /**
-     * Return the private authentication token to be used for server-to-server secured trancactions.
+     * Return the private authentication token to be used for server-to-server secured transactions.
      * Any secured service should use this function to get the CMS user authentication token. The
      * setter function `setCMSKey()` must be called before this in order to set the required credentials.
      *
@@ -444,37 +448,43 @@ class Enginesis {
         $auth = null;
         $updated = false;
         $timeNow = time();
-        $secretFile = $this->m_serverPaths['DATA'] . '.enginesis_auth.json';
-        $authDefault = [
-            'user_id' => 0,
-            'user_name' => 'user',
-            'access_level' => 0,
-            'auth_token' => '',
-            'auth_token_expires' => '',
-            'refresh_token' => '',
-            'refresh_token_expires' => '',
-            'date_saved' => ''
-        ];
+        $secretFile = $this->m_serverPaths['PRIVATE'] . '.enginesis_auth.json';
 
         // load existing file
         if (file_exists($secretFile)) {
             $contents = file_get_contents($secretFile);
             $auth = json_decode($contents);
-            // TODO: verify the loaded file was not tampered/spoofed.
-            // TODO: Verify this information matches the set CMS user.
+            // Verify the loaded file was not tampered/spoofed.
+            $cr = md5($auth->date_saved . $auth->user_id . $auth->user_name . $auth->access_level . $this->m_siteId);
+            if ($cr != $auth->cr) {
+                $errorCode = EnginesisErrors::INVALID_DATA;
+                $errorMessage = 'Saved hash does not agree with saved content.';
+            }
+            // @todo: Verify this information matches the set CMS user.
         }
         if ($auth == null) {
-            $auth = $authDefault;
+            $auth = json_decode(<<<EOD
+            {
+                "user_id":0,
+                "user_name":"",
+                "access_level":0,
+                "auth_token":"",
+                "auth_token_expires":"1999-12-31 21:21:21",
+                "refresh_token":"",
+                "refresh_token_expires":"1999-12-31 21:21:21",
+                "date_saved":"1999-12-31 21:21:21",
+                "cr":""
+            }
+            EOD);
         }
         // determine if existing token is still valid
-        $authTokenExpireTime = strtotime($auth['auth_token_expires']);
+        $authTokenExpireTime = strtotime($auth->auth_token_expires);
         if ($authTokenExpireTime === false || $timeNow > $authTokenExpireTime) {
             // auth token is expired, determine if refresh token is valid
-            $refreshTokenExpireTime = strtotime($auth['refresh_token_expires']);
+            $refreshTokenExpireTime = strtotime($auth->refresh_token_expires);
             if ($refreshTokenExpireTime === false || $timeNow > $refreshTokenExpireTime) {
                 // need to do a full login, we expect the parameters to be passed in
                 $CMSAccountCredentials = $this->m_cmsCredentials;
-//                echo("CMS creds " . json_encode($CMSAccountCredentials));
                 if (empty($CMSAccountCredentials) || empty($CMSAccountCredentials['user_name']) || empty($CMSAccountCredentials['password'])) {
                     $errorCode = EnginesisErrors::INVALID_LOGIN;
                     $errorMessage = 'User login failed, check user credentials.';
@@ -485,18 +495,18 @@ class Enginesis {
                         $errorMessage = 'User login failed, check user credentials.';
                     } else {
                         $updated = true;
-                        $auth['user_id'] = intval($userInfo->user_id, 10);
-                        $auth['user_name'] = $userInfo->user_name;
-                        $auth['access_level'] = intval($userInfo->access_level, 10);
-                        $auth['auth_token'] = $userInfo->authtok;
-                        $auth['auth_token_expires'] = $userInfo->session_expires;
-                        $auth['refresh_token'] = $userInfo->refresh_token;
-                        $auth['refresh_token_expires'] = $userInfo->expires;
+                        $auth->user_id = intval($userInfo->user_id, 10);
+                        $auth->user_name = $userInfo->user_name;
+                        $auth->access_level = intval($userInfo->access_level, 10);
+                        $auth->auth_token = $userInfo->authtok;
+                        $auth->auth_token_expires = $userInfo->session_expires;
+                        $auth->refresh_token = $userInfo->refresh_token;
+                        $auth->refresh_token_expires = $userInfo->expires;
                     }
                 }
             } else {
                 // need to do a session refresh
-                $userInfo = $this->adminSessionRefresh($auth['user_id'], $auth['refresh_token']);
+                $userInfo = $this->adminSessionRefresh($auth->user_id, $auth->refresh_token);
                 if ($userInfo == null) {
                     $errorCode = EnginesisErrors::INVALID_TOKEN;
                     $errorMessage = 'Authentication token invalid or expired and refresh token invalid or expired.';
@@ -504,26 +514,31 @@ class Enginesis {
                     $updated = true;
                 }
             }
-        } else {
-            // assume if token not expired, then everything else is good.
-            echo("All good\n");
         }
-        //
         // if token is new/refreshed, save $auth
         if ($updated) {
-            $auth['date_saved'] = date('Y-m-d H:i:s', $timeNow);
+            $auth->date_saved = date('Y-m-d H:i:s', $timeNow);
+            $auth->cr = md5($auth->date_saved . $auth->user_id . $auth->user_name . $auth->access_level . $this->m_siteId);
             $contents = json_encode($auth);
-            $writeStatus = file_put_contents($secretFile, $contents);
-            if ($writeStatus === false) {
+            try {
+                $errorLevel = error_reporting();
+                error_reporting($errorLevel & ~E_WARNING);
+                $writeStatus = file_put_contents($secretFile, $contents);
+                if ($writeStatus === false) {
+                    $errorCode = EnginesisErrors::FILE_WRITE_FAILED;
+                    $errorMessage = 'Unable to store authentication on the server, check file privs.';
+                }
+                error_reporting($errorLevel);
+            } catch (Exception $exception) {
                 $errorCode = EnginesisErrors::FILE_WRITE_FAILED;
-                $errorMessage = 'Unable to store authentication on the server, check file privs.';
+                $errorMessage = 'Unable to store authentication on the server, ' . $exception->getMessage();
             }
         }
         if ($errorCode != EnginesisErrors::NO_ERROR) {
             $this->setLastError($errorCode, $errorMessage);
             $this->debugInfo("getCMSAuthToken error $errorCode:$errorMessage result " . json_encode($auth), __FILE__, __LINE__);
         }
-        return $auth['auth_token'];
+        return $auth->auth_token;
     }
 
     /**
@@ -556,8 +571,8 @@ class Enginesis {
 
     /**
      * Return the Enginesis service host domain to the Enginesis server this instance is communicating with.
-     * This is expected to be the host domain of the Enginesis services endpoint. For example <enginesis class="varyn-d com"></enginesis>when the
-
+     * This is expected to be the host domain of the Enginesis services endpoint. For example enginesis.varyn-l.com when the
+     *
      * @return string Enginesis services host domain.
      */
     public function getServiceHost() {
@@ -618,10 +633,10 @@ class Enginesis {
 
     /**
      * Parse the given host name to determine which stage we are currently running on.
-     * @param $hostName string - host name or domain name to parse. If null we try the current `serverName()`.
-     * @return string the -l, -d, -q, -x part, or '' for live.
+     * @param string $hostName Host name or domain name to parse. If null we try the current `serverName()`.
+     * @return string The -l, -d, -q, -x part, or '' for live.
      */
-    public function serverStage($hostName = null) {
+    public function serverStage($hostName = '') {
         // assume live until we prove otherwise
         $targetPlatform = '';
         if (strlen($hostName) == 0) {
@@ -704,7 +719,7 @@ class Enginesis {
             if ($this->m_siteId !== 100) {
                 $enginesisServiceHost .= $defaultEnginesisService . '.';
             }
-            $enginesisServiceHost .= $this->serverTail($this->domainForTargetStage($enginesisServer));
+            $enginesisServiceHost .= $this->serverTail($this->domainForTargetPlatform($enginesisServer));
         } else {
             // Caller can provide a specific server we should converse with
             $URLParts = parse_url($enginesisServer);
@@ -841,7 +856,7 @@ class Enginesis {
                         $timestamp = $refreshTokenJSON->timestamp;
                     } else {
                         $refreshToken = null;
-                        // TODO: the saved token isn't valid, some type of logging and recovery here?
+                        // @todo: the saved token isn't valid, some type of logging and recovery here?
                     }
                 } else {
                     $refreshToken = null;
@@ -872,7 +887,7 @@ class Enginesis {
 
     /**
      * Restore the user's session from the provided authentication token.
-     * TODO: This code is actually WRONG! We cannot do this on the (PHP) client. Instead, we should
+     * @todo: This code is actually WRONG! We cannot do this on the (PHP) client. Instead, we should
      * send a SessionBegin request to the Enginesis server and it will tell us this authtoken is
      * acceptable or not.
      * @param string|null $authToken
@@ -1139,7 +1154,7 @@ class Enginesis {
         if (isset($_COOKIE[SESSION_USERINFO])) {
             try {
                 $userInfo = json_decode($_COOKIE[SESSION_USERINFO]);
-                // TODO: Validate this user data make sure it was not tampered, check if expired.
+                // @todo: Validate this user data make sure it was not tampered, check if expired.
                 $this->debugInfo("decoded cookie for SESSION_USERINFO " . json_encode($userInfo), __FILE__, __LINE__);
             } catch (Exception $e) {
                 $this->setLastError('CANNOT_GET_USERINFO', 'sessionUserInfoGet could not get cookie: ' . $e->getMessage());
@@ -1389,6 +1404,25 @@ class Enginesis {
     }
 
     /**
+     * Return a string of parameter key/value pairs, but remove any sensitive information from the output.
+     * @param Array An array or object of key/value pairs to log.
+     * @return string A string representation of the parameters.
+     */
+    public function logSafeParameters($parameters) {
+        $sensitiveParameters = ['authtok', 'authtoken', 'token', 'refresh_token', 'password', 'secondary_password', 'apikey', 'developer_key'];
+        $logParams = '';
+        if (is_array($parameters) && count($parameters) > 0) {
+            foreach ($parameters as $key => $value) {
+                if (in_array($key, $sensitiveParameters)) {
+                    $value = 'XXXXX';
+                }
+                $logParams .= (strlen($logParams) > 0 ? ', ' : 'parameters: ') . $key . '=' . $value;
+            }
+        }
+        return $logParams;
+    }
+
+    /**
      * Encode a key/value array into URL parameters. `key=value&key=value&...`.
      * @param array $data A key/value array.
      * @return string a URL parameter query string.
@@ -1458,7 +1492,7 @@ class Enginesis {
                 $serverParams['response'] = $this->m_responseFormat;
             }
             foreach ($parameters as $key => $value) {
-                $serverParams[$key] = $value; // urlencode($value); // TODO: I'm not sure we should urlencode the data as it is going into the database encoded.
+                $serverParams[$key] = $value; // urlencode($value); // @todo: I'm not sure we should urlencode the data as it is going into the database encoded.
             }
             if ( ! isset($parameters['language_code'])) {
                 $serverParams['language_code'] = $this->m_languageCode;
@@ -1494,7 +1528,7 @@ class Enginesis {
     }
 
     /**
-     * callServerAPI: Make an Enginesis API request over the WWW
+     * Make an Enginesis API request over the WWW.
      * @param string $serviceName is the API service to call.
      * @param Array|null $parameters Key => value array of parameters e.g. array('site_id' => 100);
      * @param boolean $isSecure Set to true if this is a secured request. Secured requests require additional set up.
@@ -1526,7 +1560,7 @@ class Enginesis {
                 // invalid request to a secured service
                 $errorInfo = 'Invalid secure transaction, missing CMS key or CMS admin user authentication.';
                 $this->debugCallback($errorInfo, __FILE__, __LINE__);
-                $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
+                $contents = $this->makeErrorResponse(EnginesisErrors::SYSTEM_ERROR, $errorInfo, $parameters);
                 return $contents;
             }
         } else {
@@ -1534,7 +1568,7 @@ class Enginesis {
             if ($authenticationToken != null && $this->m_authTokenWasValidated) {
                 // Move authentication token to header so it is not sent in body
                 $headers[] = 'Authentication: Bearer ' . $authenticationToken;
-                // weed it out of passed in parameters if it is there so it doesnt appear in logs
+                // weed it out of passed in parameters if it is there so it doesn't appear in logs
                 unset($parameters['authtok']);
                 unset($parameters['token']);
             }
@@ -1542,7 +1576,7 @@ class Enginesis {
         $isLocalhost = serverStage() == '-l';
         $url = $this->m_serviceEndPoint;
         $setSSLCertificate = startsWith(strtolower($url), 'https://');
-        $this->debugInfo("Calling $serviceName on $url with " . json_encode($parameters), __FILE__, __LINE__);
+        $this->debugInfo("Calling $serviceName on $url with " . $this->logSafeParameters($parameters), __FILE__, __LINE__);
         $ch = curl_init($url);
         if ($ch) {
             $referrer = $this->m_serviceProtocol . '://' . $this->getServerName() . $this->currentPagePath();
@@ -1573,12 +1607,12 @@ class Enginesis {
             if ( ! $succeeded) {
                 $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. cURL error ' .$curlError . ': ' . curl_error($ch);
                 $this->debugCallback($errorInfo, __FILE__, __LINE__);
-                $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
+                $contents = $this->makeErrorResponse(EnginesisErrors::SYSTEM_ERROR, $errorInfo, $parameters);
             }
             curl_close($ch);
         } else {
             $errorInfo = 'System error: unable to contact ' . $this->m_serviceEndPoint . ' or the server did not respond.';
-            $contents = $this->makeErrorResponse('SYSTEM_ERROR', $errorInfo, $parameters);
+            $contents = $this->makeErrorResponse(EnginesisErrors::SYSTEM_ERROR, $errorInfo, $parameters);
         }
         $this->debugInfo("callServerAPI response from $serviceName: $contents", __FILE__, __LINE__);
         if ($response == 'json') {
@@ -1603,7 +1637,7 @@ class Enginesis {
     /**
      * Determine if the error code is an error or a non-error state. We need this because it holds a
      * variety of different states, either null or '' to indicate no error.
-     * @param $lastErrorCode {object} either an error object or null.
+     * @param object $lastErrorCode Either an error object or null to use the last recorded error.
      * @return boolean: true if the error provided is an error, false if it is not.
      */
     public function isError ($lastErrorCode) {
@@ -1645,23 +1679,25 @@ class Enginesis {
         $extendedInfo = '';
         $resultSet = null;
         if ($enginesisResponse != null) {
-            $results = $enginesisResponse->results;
-            if ($results) {
-                $status = $results->status;
-                if ($status) {
+            if (isset($enginesisResponse->results)) {
+                $results = $enginesisResponse->results;
+                if (isset($results->status)) {
+                    $status = $results->status;
                     $success = $status->success;
                     $statusMessage = $status->message;
                     if (isset($status->extended_info)) {
                         $extendedInfo = $status->extended_info;
                     }
-                    if ($success) {
-                        if (isset($results->result)) {
-                            // usually result is an array of rows.
-                            $resultSet = $results->result;
-                        } elseif (isset($results->row)) {
-                            // "row" was a legacy from XML, we should not see this with JSON.
-                            $resultSet = $results->row;
+                    // if the service failed but returned a result we still want it
+                    if (isset($results->result)) {
+                        // usually result is an array of rows.
+                        $resultSet = $results->result;
+                        if (isset($resultSet->row)) {
+                            $resultSet = $resultSet->row;
                         }
+                    } elseif (isset($results->row)) {
+                        // "row" was a legacy from old server implementation but some APIs still return it, particularly in edge cases and errors.
+                        $resultSet = $results->row;
                     }
                 } else {
                     $statusMessage = EnginesisErrors::SERVER_RESPONSE_NOT_VALID;
@@ -1681,7 +1717,7 @@ class Enginesis {
     /**
      * Return the URL of the request game image. This takes the parameters supplied and requests
      * from the back end the best fit image.
-     * TODO: this really needs to call a server-side service to perform this resolution as we need to use PHP to determine which files are available and the closest match.
+     * @todo: this really needs to call a server-side service to perform this resolution as we need to use PHP to determine which files are available and the closest match.
      *
      * @param string gameName game folder on server where the game assets are stored. Most of the game queries
      *    (GameGet, GameList, etc) return game_name and this is used as the game folder.
@@ -1904,7 +1940,6 @@ class Enginesis {
             'user_name' => $userName,
             'password' => $password
         ];
-//        echo("callServerAPI $service $userName, $password\n");
         $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if ($results != null) {
@@ -1961,7 +1996,7 @@ class Enginesis {
 
     /**
      * Logout the user clearing all internal cookies and data structures.
-     * @return bool: true if successful. If false there was an internal error (logout should never really fail.)
+     * @return boolan true if successful. If false there was an internal error (logout should never really fail.)
      */
     public function userLogout () {
         $service = 'UserLogout';
@@ -1969,7 +2004,7 @@ class Enginesis {
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         $this->m_refreshToken = null;
-        setcookie(REFRESH_COOKIE, null, time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain(), true, false);
+        setcookie(REFRESH_COOKIE, '', time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain(), true, false);
         $this->sessionClear();
         return $results != null;
     }
@@ -2064,7 +2099,7 @@ class Enginesis {
      */
     public function userRegistration ($userInfo) {
         $service = 'RegisteredUserCreate';
-        // TODO: user_name, email_address, password are required. We can send it up to the server and wait for a response but we could save time and do it here.
+        // @todo: user_name, email_address, password are required. We can send it up to the server and wait for a response but we could save time and do it here.
         $parameters = [
             'user_name' => $userInfo['user_name'],
             'password' => $userInfo['password'],
@@ -2096,10 +2131,10 @@ class Enginesis {
         if (is_array($results) && count($results) > 0) {
             $userInfoResult = $results[0];
             $cr = $userInfoResult->cr;
-            // TODO: Verify hash to make sure payload was not tampered
+            // @todo: Verify hash to make sure payload was not tampered
             $user_id = $userInfoResult->user_id;
             $secondary_password = $userInfoResult->secondary_password;
-            // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
+            // @todo: If this site auto-confirms user registration then we should log the user in automatically now.
             // We know this because the server gives us the token when we are to do this.
             if (isset($userInfoResult->authtok)) {
                 $this->sessionSave($userInfoResult->authtok, $userInfoResult->user_id, $userInfoResult->user_name, $userInfoResult->site_user_id, $userInfoResult->access_level, EnginesisNetworks::Enginesis);
@@ -2163,8 +2198,8 @@ class Enginesis {
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if (is_array($results) && count($results) > 0) {
             $userInfoResult = $results[0];
-            // TODO: Verify hash to make sure payload was not tampered
-            // TODO: If this site auto-confirms user registration then we should log the user in automatically now.
+            // @todo: Verify hash to make sure payload was not tampered
+            // @todo: If this site auto-confirms user registration then we should log the user in automatically now.
             // We know this because the server gives us the token when we are to do this.
             if (isset($userInfoResult->authtok)) {
                 $this->sessionSave($userInfoResult->authtok, $userInfoResult->user_id, $userInfoResult->user_name, $userInfoResult->site_user_id, $userInfoResult->access_level, EnginesisNetworks::Enginesis);
@@ -2337,10 +2372,14 @@ class Enginesis {
 
     /**
      * Trigger the forgot password procedure. The server will reset the user's password and
-     *   send an email to the email address on record to follow a link to reset the password.
-     * @param $userName: string the user's name
-     * @param $email_address: string the user's email address
-     * @return bool: true if the process was started, false if there was an error.
+     * send an email to the email address on record to follow a link to reset the password.
+     * Either user name or email address are required, not both. The backend will use the
+     * value supplied to look up the account since both email address and user name are
+     * required to be unique.
+     * @param string $userName the user's name
+     * @param string $email_address the user's email address
+     * @return null|object: Enginesis response object with the user's temporary password if
+     * the request succeeded, or an Enginesis error if the process failed.
      */
     public function userForgotPassword ($userName, $email_address) {
         $service = 'RegisteredUserForgotPassword';
@@ -2350,7 +2389,7 @@ class Enginesis {
         if (is_array($results) && count($results) > 0) {
             $result = $results[0];
         } else {
-            $result = null;
+            $result = $results;
             $this->debugCallback('userForgotPassword failed: ' . $this->m_lastError['message'] . ' / ' . $this->m_lastError['extended_info'], __FILE__, __LINE__);
         }
         return $result;
@@ -2369,23 +2408,35 @@ class Enginesis {
     }
 
     /**
-     * Start a user delete request. Must be logged in as a CMS user to do this.
-     * @param string confirmation code.
-     * @return Array Array of rows if succeeded, null when failed.
+     * Start a user delete request. Either provide and Enginesis user id
+     * as a parameter or call `$enginesis->setSiteUserId($network_id, $site_user_id)`
+     * to set the network user to delete. Must be logged in as a CMS user to do this.
+     * @param integer|null A user id to delete. If null, use the registered network site user id.
+     * @return Array Server response if succeeded, Enginesis error when failed.
      */
-    public function registeredUserDelete ($userId) {
+    public function registeredUserDelete ($userId = null) {
         $service = 'RegisteredUserDelete';
         $isSecure = true;
-        if ($userId < 9999) {
-            $userId = $this->m_userId;
+        $parameters = null;
+        if ( ! empty($this->m_siteUserId) && $this->m_networkId != 1) {
+            $parameters = [
+                'user_id_to_delete' => 0,
+                'site_user_id' => $this->m_siteUserId,
+                'network_id' => $this->m_networkId
+            ];
+        } elseif ($this->isValidId($userId)) {
+            $parameters = [
+                'user_id_to_delete' => $this->m_userId,
+                'site_user_id' => '',
+                'network_id' => 0
+            ];
         }
-        $parameters = [
-            'user_id_to_delete' => $userId,
-            'site_user_id' => $this->m_siteUserId,
-            'network_id' => $this->m_networkId
-        ];
-        $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
-        return $this->setLastErrorFromResponse($enginesisResponse);
+        if ($parameters != null) {
+            $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
+            return $this->setLastErrorFromResponse($enginesisResponse);
+        } else {
+            return $this->makeErrorResponse(EnginesisErrors::INVALID_USER_ID, 'User id is not valid.', null);
+        }
     }
 
     /**
@@ -2605,15 +2656,33 @@ class Enginesis {
     /**
      * Return the proper URL to use to show an avatar for a given user. The default is the default size and the current user.
      * This URL should always return an image.
-     * @param int $size
-     * @param int $userId
-     * @return string
+     * @param int $size Enginesis avatar size. 0, 1, 2.
+     * @param int $userId Enginesis user id.
+     * @return string URL to image.
      */
     public function avatarURL ($size = 0, $userId = 0) {
         if ( ! $this->isValidId($userId)) {
             $userId = $this->m_userId;
         }
         return $this->m_avatarEndPoint . '?site_id=' . $this->m_siteId . '&user_id=' . $userId . '&size=' . $size;
+    }
+
+    /**
+     * Return a list of all games for a given site id.
+     * @param integer $start Query starting item index number.
+     * @param integer $numberOfItems Number of items to return.
+     * @param integer $statusId Status of games to return (2=active)
+     * @return Array An array of objects.
+     */
+    public function siteListGames ($start = 1, $numItems = 50, $statusId = 2) {
+        $service = 'SiteListGames';
+        $parameters = [
+            'start_item' => $start,
+            'num_items' => $numItems,
+            'game_status_id' => $statusId
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
     }
 
     /**
@@ -2698,8 +2767,22 @@ class Enginesis {
     }
 
     /**
-     * Return a list of games given a specific list id. Arbitrary curated games can be
-     * organized into lists. You need to know the list id.
+     * Return a list of games given a game list id.
+     * @param integer $gameListId A predefined game list identifier.
+     * @return Array An array of objects.
+     */
+    public function gameListListGames ($gameListId) {
+        $service = 'GameListListGames';
+        $parameters = ['game_list_id' => $gameListId];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * Return a list of games given their game ids.
+     * @param string $listOfGameIds A list of game ids to look up, each separated by $delimiter.
+     * @param string $delimiter A single character used to separate the game ids, such as ,.
+     * @return Array An array of objects.
      */
     public function gameListByIdList ($listOfGameIds, $delimiter) {
         $service = 'GameListByIdList';
@@ -2710,6 +2793,18 @@ class Enginesis {
             $delimiter = ',';
         }
         $parameters = ['game_id_list' => $listOfGameIds, 'delimiter' => $delimiter];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * Return a list of games given a search string.
+     * @param string $search A string to search for.
+     * @return Array An array of objects.
+     */
+    public function gameFind ($search) {
+        $service = 'GameFind';
+        $parameters = ['game_name_part' => $search];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         return $this->setLastErrorFromResponse($enginesisResponse);
     }
@@ -2764,13 +2859,70 @@ class Enginesis {
     }
 
     /**
+     * Helper function to manage the local user favorite games cache.
+     * @param integer $gameId A game id to add to the users favorite games cache.
+     */
+    private function addToUserFavoriteGamesCache($gameId) {
+        if ($this->m_favoriteGames != null && ! in_array($gameId, $this->m_favoriteGames)) {
+            array_push($this->m_favoriteGames, $gameId);
+        }
+    }
+
+    /**
+     * Helper function to manage the local user favorite games cache.
+     * @param integer $gameId A game id to remove from the users favorite games cache.
+     */
+    private function removeFromUserFavoriteGamesCache($gameId) {
+        if ($this->m_favoriteGames != null && in_array($gameId, $this->m_favoriteGames)) {
+            $index = array_search($gameid, $this->m_favoriteGames);
+            array_splice($this->m_favoriteGames, $index, 1);
+        }
+    }
+
+    /**
+     * Helper function to manage the local user favorite games cache.
+     * @param EnginesisResponse $serverResponse A list of the current favorite games delivered
+     *   from the server as a response to a favorite games query.
+     */
+    private function updateUserFavoriteGamesCache($serverResponse) {
+        $this->m_favoriteGames = [];
+        $this->m_favoriteGamesNextCheck = time() + 300; // check again in 5 minutes
+        if (count($serverResponse) > 0) {
+            for ($i = 0; $i < count($serverResponse); $i += 1) {
+                array_push($this->m_favoriteGames, $serverResponse[$i]->game_id);
+            }
+        }
+    }
+
+    /**
+     * Determine if the given gameId is a favorite game. We check the local favorite
+     * games cache and if it is still valid (within ~5 minutes since last update). If
+     * the cache is no longer valid then we query the server for the user's favorite games.
+     * @param integer $gameId Which game to check, the default is the current set game if there is one.
+     * @return bool true if it is a favorite of the current logged in user.
+     */
+    public function isUserFavoriteGame($gameId) {
+        $verifiedGameId = $this->isValidId($gameId) ? $gameId : $this->gameId;
+        if ( ! ($this->m_favoriteGames != null
+             && $this->m_favoriteGamesNextCheck != null
+             && $this->m_favoriteGamesNextCheck < (time() + 300))) {
+            $response = $this->userFavoriteGamesList();
+        }
+        return in_array($verifiedGameId, $this->m_favoriteGames);
+    }
+
+    /**
      * Return the favorite game list for the current logged in user.
      */
     public function userFavoriteGamesList() {
         $service = 'UserFavoriteGamesList';
         $parameters = [];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        return $this->setLastErrorFromResponse($enginesisResponse);
+        $response = $this->setLastErrorFromResponse($enginesisResponse);
+        if ( ! $this->isError()) {
+            $this->updateUserFavoriteGamesCache($response);
+        }
+        return $response;
     }
 
     /**
@@ -2778,9 +2930,18 @@ class Enginesis {
      */
     public function userFavoriteGamesAssign($gameId) {
         $service = 'UserFavoriteGamesAssign';
-        $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
-        $enginesisResponse = $this->callServerAPI($service, $parameters);
-        return $this->setLastErrorFromResponse($enginesisResponse);
+        $verifiedGameId = $this->isValidId($gameId) ? $gameId : $this->gameId;
+        if ($this->isValidId($verifiedGameId)) {
+            $parameters = ['game_id' => $verifiedGameId];
+            $enginesisResponse = $this->callServerAPI($service, $parameters);
+            $response = $this->setLastErrorFromResponse($enginesisResponse);
+            if ( ! $this->isError()) {
+                $this->addToUserFavoriteGamesCache($verifiedGameId);
+            }
+            return $response;
+        } else {
+            return $this->makeErrorResponse(EnginesisErrors::INVALID_GAME_ID, 'Game id is not valid.', null);
+        }
     }
 
     /**
@@ -2796,24 +2957,37 @@ class Enginesis {
             'delimiter' => ','
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        return $this->setLastErrorFromResponse($enginesisResponse);
+        $response = $this->setLastErrorFromResponse($enginesisResponse);
+        if ( ! $this->isError()) {
+            $this->updateUserFavoriteGamesCache($response);
+        }
+        return $response;
     }
 
     /**
      * Remove a game from the user's favorite game list.
      */
-    public function userFavoriteGamesDelete($gameId) {
-        $service = 'UserFavoriteGamesDelete';
-        $parameters = ['game_id' => $this->isValidId($gameId) ? $gameId : $this->gameId];
-        $enginesisResponse = $this->callServerAPI($service, $parameters);
-        return $this->setLastErrorFromResponse($enginesisResponse);
+    public function userFavoriteGamesUnassign($gameId) {
+        $service = 'UserFavoriteGamesUnassign';
+        $verifiedGameId = $this->isValidId($gameId) ? $gameId : $this->gameId;
+        if ($this->isValidId($verifiedGameId)) {
+            $parameters = ['game_id' => $verifiedGameId];
+            $enginesisResponse = $this->callServerAPI($service, $parameters);
+            $response = $this->setLastErrorFromResponse($enginesisResponse);
+            if ( ! $this->isError()) {
+                $this->removeFromUserFavoriteGamesCache($verifiedGameId);
+            }
+            return $response;
+        } else {
+            return $this->makeErrorResponse(EnginesisErrors::INVALID_GAME_ID, 'Game id is not valid.', null);
+        }
     }
 
     /**
      * Remove a list of games from the user's favorite game list.
      */
-    public function userFavoriteGamesDeleteList($gameIdList) {
-        $service = 'UserFavoriteGamesDeleteList';
+    public function userFavoriteGamesUnassignList($gameIdList) {
+        $service = 'UserFavoriteGamesUnassignList';
         if (is_array($gameIdList)) {
             $gameIdList = implode(',', $gameIdList);
         }
@@ -2822,7 +2996,11 @@ class Enginesis {
             'delimiter' => ','
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
-        return $this->setLastErrorFromResponse($enginesisResponse);
+        $response = $this->setLastErrorFromResponse($enginesisResponse);
+        if ( ! $this->isError()) {
+            $this->updateUserFavoriteGamesCache($response);
+        }
+        return $response;
     }
 
     /**

@@ -2,13 +2,12 @@
 /**
  * Common utility PHP functions for sites and services that communicate with the Enginesis backend.
  * This file defines the following globals, which are global so they can be used in subordinate PHP pages:
- *   SERVER_ROOT is the file path to the root of the web site file structure. 
+ *   SERVER_ROOT is the file path to the root of the web site file structure.
  *   $enginesis: a global to access this object instance
  *   $siteId: enginesis site_id for this website.
  *   $serverStage: stage for this instance: -l, -d, -q, or '' for Live
  *   $serverName: name of this server?
- *   $server: which enginesis server to converse with, full protocol/domain/url e.g. https://www.enginesis.com
- *   $enginesisServer: location/root URL of the enginesis server we are conversing with
+ *   $enginesisServer: which enginesis server to converse with, full protocol/domain/url e.g. https://www.enginesis.com
  *   $enginesisLogger: reference to the logging system
  *   $webServer: our (this) web server e.g. varyn.com
  *   $isLoggedIn: true if the user is logged in
@@ -224,8 +223,8 @@ function getServiceProtocol () {
  * Return a variable that was posted from a form, or in the REQUEST object (GET or COOKIES), or a default if not found.
  * This way POST is the primary concern but if not found will fallback to the other methods.
  * @param string|array $varName variable to read from request. If array, iterates array of strings until the first entry returns a result.
- * @param mixed $defaultValue A value to return if the parameter is not provided in teh request.
- * @return mixed The value of the parameter.
+ * @param mixed $defaultValue A value to return if the parameter is not provided in the request.
+ * @return mixed The value of the parameter or $defaultValue.
  */
 function getPostOrRequestVar ($varName, $defaultValue = NULL) {
     $value = null;
@@ -255,19 +254,36 @@ function getPostOrRequestVar ($varName, $defaultValue = NULL) {
 
 /**
  * Return a variable that was posted from a form, or a default if not found.
- * @param $varName
- * @param null $defaultValue
- * @return null
+ * @param string|array $varName variable to read from POST. If array, iterates array of strings until the first entry returns a result.
+ * @param mixed $defaultValue A value to return if the parameter is not provided in the POST.
+ * @return mixed The value of the parameter or $defaultValue.
  */
 function getPostVar ($varName, $defaultValue = NULL) {
-    return isset($_POST[$varName]) ? $_POST[$varName] : $defaultValue;
+    if (is_array($varName)) {
+        for ($i = 0; $i < count($varName); $i ++) {
+            $value = getPostVar($varName[$i], null);
+            if ($value != null) {
+                break;
+            }
+        }
+        if ($value == null) {
+            $value = $defaultValue;
+        }
+    } else {
+        if (isset($_POST[$varName])) {
+            $value = $_POST[$varName];
+        } else {
+            $value = $defaultValue;
+        }
+    }
+    return $value;
 }
 
 /**
  * Return the HTTP header value for a specified header key. For example,
  * if the header set is "Authentication: Bearer token", then calling
  * getHTTPHeader('Authentication') should return "Bearer token".
- * 
+ *
  * @param string $headerName The name of an expected entry in the HTTP headers sent by a client request.
  * @return string|null The header value is returned, if found. If not found, null is returned.
  */
@@ -341,6 +357,22 @@ function processSearchRequest() {
         header('location:/games/?q=' . $search);
         exit;
     }
+}
+
+/**
+ * A function to look at a string and determine if it appears to be a URL, by
+ * the patterns /, ./, http://, https://.
+ * @param string $proposedURL A string to examine.
+ * @return boolean true if it matches an expected URL pattern, false if it does not.
+ */
+function looksLikeURLPattern($proposedURL) {
+    if ($proposedURL[0] == '/'
+    || substr_compare($proposedURL, './', 0, 2) === 0
+    || substr_compare($proposedURL, 'https://', 0, 8) === 0
+    || substr_compare($proposedURL, 'http://', 0, 7) === 0) {
+        return true;
+    }
+    return false;
 }
 
 /**
@@ -600,8 +632,7 @@ function verifyStage($includePassedTests = false) {
  * a http protocol with service domain with its current stage.
  * @return string Server domain.
  */
-function getCurrentDomain()
-{
+function getCurrentDomain() {
     return
         'http' . (isset($_SERVER['HTTPS']) ? 's' : '')
         . '://'
@@ -715,7 +746,7 @@ function domainForTargetStage($targetStage, $hostName = null) {
  * @param string $hostName Host name or domain name to parse. If null we try the current `serverName()`.
  * @return string the -l, -d, -q, -x part, or '' for live.
  */
-function serverStage($hostName = null) {
+function serverStage($hostName = '') {
     // assume live until we prove otherwise
     $targetPlatform = '';
     if (empty($hostName)) {
@@ -892,10 +923,10 @@ function validateInputFormHackerToken ($token) {
 /**
  * Helper function to verify the form hack prevention are verified. There are two checks performed on a
  * page that has an input form that tends to get hacked by bots:
- * 
+ *
  * 1. An input field that asks for an email address, but we expect it to be empty. A real user will not enter a value in this field (typically it is hidden.)
  * 2. A time-out token is placed in a hidden field in the form. If the form is submitted after this timer times out we reject the submission (took too long.)
- * 
+ *
  * @param array $inputFormNames an array of field names used on the current page form to check for the inputs.
  *   Order dependent. By default we use 'emailaddress' and 'all-clear'.
  *   'emailaddress' is a form input that is a honeypot, we expect this to be empty, but a hacker would be compelled to fill in a value.
@@ -1289,7 +1320,7 @@ function validateGender ($gender) {
 
 /**
  * Given an email address test to see if it appears to be valid.
- * @param $email {string} an email address to check
+ * @param string $email an email address to check
  * @return bool true if we think the email address looks valid, otherwise false.
  */
 function checkEmailAddress ($email) {
@@ -1300,7 +1331,7 @@ function checkEmailAddress ($email) {
  * Clean extended characters out of the string. This helps sanitize strings for general
  * display cases. For example, clean up a Microsoft Word copyied string for more general
  * usage. Extended characters converted to their common ascii equivalent.
- * 
+ *
  * @param string $input A string to clean.
  * @return string The $input string with any extended characters converted to their common ascii equivalent.
  */
@@ -1331,7 +1362,7 @@ function fullyCleanString($source) {
 
 /**
  * Clean a proposed file name of any undesired characters and return a nice file name.
- * 
+ *
  * @param string $fileName A proposed file name.
  * @return string Proposed file name with undesired characters removed.
  */
@@ -1341,7 +1372,7 @@ function cleanFileName ($fileName) {
 
 /**
  * Strip HTML tags and javascript handlers from the source string.
- * 
+ *
  * @param string $source A source string to clean of any HTML tags.
  * @param array $allowedTags An array of strings indicating any HTML tags that are allowed and should not be stripped.
  *    Tags must be specified with the angle braces, such as "<div>". Close tags are not required.
@@ -1727,6 +1758,25 @@ function debugToString($value) {
     return json_encode($value);
 }
 
+/**
+ * Return a string of parameter key/value pairs, but remove any sensitive information from the output.
+ * @param Array An array or object of key/value pairs to log.
+ * @return string A string representation of the parameters.
+ */
+function logSafeParameters($parameters) {
+    $sensitiveParameters = ['authtok', 'authtoken', 'token', 'refresh_token', 'password', 'secondary_password', 'apikey', 'developer_key'];
+    $logParams = '';
+    if (is_array($parameters) && count($parameters) > 0) {
+        foreach ($parameters as $key => $value) {
+            if (in_array($key, $sensitiveParameters)) {
+                $value = 'XXXXX';
+            }
+            $logParams .= (strlen($logParams) > 0 ? ', ' : 'parameters: ') . $key . '=' . $value;
+        }
+    }
+    return $logParams;
+}
+
 // "Global" PHP variables available to all scripts. See also serverConfig.php.
 $enginesisLogger = new LogMessage([
     'log_active' => true,
@@ -1737,9 +1787,10 @@ $enginesisLogger = new LogMessage([
 $page = '';
 $webServer = '';
 $enginesis = new Enginesis($siteId, null, ENGINESIS_DEVELOPER_API_KEY, 'reportError');
-$enginesis->setCMSKey(ENGINESIS_CMS_API_KEY);
+$enginesis->setCMSKey(ENGINESIS_CMS_API_KEY, $CMSUserLogins[0]['user_name'], $CMSUserLogins[0]['password']);
 $serverName = $enginesis->getServerName();
 $serverStage = $enginesis->getServerStage();
+$enginesisServer = $enginesis->getServiceRoot();
 // turn on errors for all stages except LIVE TODO: Remove from above when we are going live.
 setErrorReporting($serverStage != '');
 $isLoggedIn = $enginesis->isLoggedInUser();
