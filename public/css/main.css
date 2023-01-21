@@ -1,6 +1,4 @@
 body {
-	margin: 0px;
-	padding: 0px;
 	color: #ffffff;
 	background-color: #636363;
 	font-family: Arial, san-serif;
@@ -8,10 +6,6 @@ body {
 
 h1 {
 	color: rgb(231, 231, 231);
-}
-
-p {
-	margin: 10px;
 }
 
 .copyright {
