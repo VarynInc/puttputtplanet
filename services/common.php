@@ -7,7 +7,7 @@
  *   $siteId: enginesis site_id for this website.
  *   $serverStage: stage for this instance: -l, -d, -q, or '' for Live
  *   $serverName: name of this server?
- *   $enginesisServer: which enginesis server to converse with, full protocol/domain/url e.g. https://www.enginesis.com
+ *   $enginesisServer: which enginesis server to converse with, full protocol/domain/url e.g. https://enginesis.com
  *   $enginesisLogger: reference to the logging system
  *   $webServer: our (this) web server e.g. varyn.com
  *   $isLoggedIn: true if the user is logged in
@@ -564,7 +564,7 @@ function verifyStage($includePassedTests = false) {
 
     // Test for required PHP version
     $test = 'php-version';
-    $isValid = version_compare(phpversion(), '7.2.0', '>=');
+    $isValid = version_compare(phpversion(), '8.1.0', '>=');
     if ( ! $isValid || ($isValid && $includePassedTests)) {
         $testStatus[$test] = $isValid;
     }
@@ -851,14 +851,30 @@ function getServerHTTPProtocol ($return_full_protocol = true) {
     return $serverProtocol;
 }
 
+/**
+ * Make an object of key/value parameters to send to an Enginesis service from an array of
+ * key/value parameters. This also sanitizes the parameters. Parameters prefixed with - are
+ * considered optional and are only sent to the service if a value is provided.
+ * @param string $fn The service to call.
+ * @param integer $site_id The site-id.
+ * @param Array An array of key/values to send to the service.
+ * @return Array A complete and clean array of parameters to send to the service.
+ */
 function enginesisParameterObjectMake ($fn, $site_id, $parameters) {
     global $sync_id;
-    $serverParams = array();
+    $serverParams = [];
     $serverParams['fn'] = $fn;
     $serverParams['site_id'] = $site_id;
     $serverParams['state_seq'] = ++ $sync_id;
     $serverParams['response'] = 'json';
     foreach ($parameters as $key => $value) {
+        if ($key[0] == '-') {
+            if (isEmpty($value)) {
+                // @todo: if the parameter is not provided then don't send it, but this means you cannot ever set a string to empty so this is probably not the desired behavior.
+                continue;
+            }
+            $key = substr($key, 1);
+        }
         $serverParams[$key] = urlencode($value);
     }
     return $serverParams;
@@ -883,7 +899,7 @@ function randomString ($length, $maxCodePoint = 32, $reseed = false) {
     // create Random String: Calculates a random string based on a length given
     $chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-+:;<=>?@()[]{}!@#$%^&*-|_",.~`/\'\\';
     if ($reseed) {
-        srand((double)microtime() * 9057254886133);
+        mt_srand((double)microtime() * 9057254886133);
     }
     $i = 0;
     $string = '';
@@ -893,7 +909,7 @@ function randomString ($length, $maxCodePoint = 32, $reseed = false) {
         $maxCodePoint = strlen($chars);
     }
     while ($i < $length) {
-        $string = $string . substr($chars, rand() % $maxCodePoint, 1);
+        $string = $string . substr($chars, mt_rand() % $maxCodePoint, 1);
         $i++;
     }
     return $string;
@@ -991,6 +1007,9 @@ function tokenReplace ($text, $parameters) {
     if ( ! empty($text) && is_array($parameters) && count($parameters) > 0) {
         foreach ($parameters as $token => $value) {
             $token = "%$token%";
+            if ($value === null) {
+                $value = '';
+            }
             if (stripos($text, $token) !== false) {
                 $text = str_replace($token, $value, $text);
             }
