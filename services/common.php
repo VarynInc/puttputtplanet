@@ -1823,4 +1823,5 @@ if ($isLoggedIn) {
 if (isset($_MAIL_HOSTS)) {
     ini_set('SMTP', $_MAIL_HOSTS[$serverStage]['host']);
 }
+require_once('common-site.php');
 processTrackBack();
