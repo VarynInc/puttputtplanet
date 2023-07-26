@@ -23,3 +23,11 @@ h1 {
 .varyn-logo-footer {
 	height: 3rem;
 }
+
+a {
+	color: rgb(148, 178, 241);
+}
+
+a:hover {
+	color: rgb(214, 227, 255);
+}

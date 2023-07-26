@@ -13,8 +13,8 @@
     <META NAME="Keywords" CONTENT="mini golf free online games enginesis varyn download PC internet web development entertainment">
     <META NAME="Author" content="Varyn, Inc.">
     <META NAME="Copyright" content="� 2010 Varyn, Inc. All rights reserved.">
-    <link href="css/bootstrap.min.css" rel="stylesheet">
-    <link href="css/main.css" rel="stylesheet" type="text/css">
+    <link href="/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/css/main.css" rel="stylesheet" type="text/css">
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Q1Z42K63D7"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
@@ -27,17 +27,18 @@
     <div class="container top-promo-area">
         <div class="row justify-content-center">
             <div id="hero-image" class="col-2">
-                <img class="img-fluid" src="images/puttputt-logo01.png"/>
+                <img class="img-fluid" src="/images/puttputt-logo01.png"/>
             </div>
         </div>
         <div class="row text-center">
             <h1>That's a problem!</h1>
             <p>We messed something up. We are going to try to fix it as soon as possible.</p>
+            <p><a href="/">Home page</a></p>
         </div>
         <div class="row justify-content-center">
             <div class="col-2 text-center">
                 <a href="https://www.varyn.com" target="_blank" title="Varyn - game development, game technology, game consulting services">
-                <img class="varyn-logo-footer" src="images/Varyn-Logo-250x150.png" alt="Varyn, Inc." />
+                <img class="varyn-logo-footer" src="/images/Varyn-Logo-250x150.png" alt="Varyn, Inc." />
                 </a><br>
                 <span class="poweredby">Developed by Varyn</span>
             </div>
@@ -46,12 +47,12 @@
             </div>
             <div class="col-2 text-center">
                 <a href="https://www.enginesis.com" target="_blank" title="Enginesis - social games platform encompasing all back-end services needed for any social game">
-                <img src="images/EcolorLogoMicro.png" width="28" height="37" alt="Enginesis Social Games Platform" />
+                <img src="/images/EcolorLogoMicro.png" width="28" height="37" alt="Enginesis Social Games Platform" />
                 </a><br>
                 <span class="poweredby">Powered by Enginesis</span>
             </div>
         </div>
     </div>
-    <script src="js/bootstrap.bundle.min.js" async></script>
+    <script src="/js/bootstrap.bundle.min.js" async></script>
 </body>
 </html>
