@@ -1,0 +1,50 @@
+{
+    "name": "puttputtplanet",
+    "version": "1.0.2",
+    "description": "Putt Putt Planet website",
+    "main": "bin/build.js",
+    "scripts": {
+      "build": "node bin/build.js",
+      "clean": "rm -rf ./node_modules && rm -rf ./distrib && rm ./data/logs/*.log",
+      "deploy": "node bin/deploy.js --config=bin/deploy-config.json",
+      "sitemap": "node bin/sitemap.js",
+      "test": "jest test"
+    },
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/VarynInc/puttputtplanet.git"
+    },
+    "keywords": [
+      "minigolf",
+      "website",
+      "javascript",
+      "games",
+      "fun",
+      "play"
+    ],
+    "author": "Varyn Inc.",
+    "license": "ISC",
+    "bugs": {
+      "url": "https://github.com/VarynInc/puttputtplanet/issues"
+    },
+    "homepage": "https://puttputtplanet.com",
+    "devDependencies": {
+      "async": "^3.2.4",
+      "axios": "^0.27.2",
+      "chalk": "^4.1.2",
+      "cheerio": "^1.0.0-rc.12",
+      "fs-extra": "^10.1.0",
+      "glob": "^7.2.0",
+      "gulp-rename": "^2.0.0",
+      "imagemin": "^7.0.1",
+      "jest": "^29.3.1",
+      "os": "^0.1.2",
+      "path": "^0.12.7",
+      "pretty-bytes": "^5.6.0",
+      "rsync": "^0.6.1",
+      "shelljs": "^0.8.5",
+      "terser": "^5.16.1",
+      "yargs": "^17.6.2"
+    }
+  }
+  

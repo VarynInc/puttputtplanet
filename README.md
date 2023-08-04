@@ -1,2 +1,3 @@
 # puttputtplanet
-Website for Putt Putt Planet mini golf franchise
+
+Website for Putt Putt Planet mini golf franchise.

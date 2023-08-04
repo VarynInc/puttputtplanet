@@ -1,0 +1,15 @@
+{
+    "site": "puttputtplanet",
+    "game": "111",
+    "targetstage": "-q",
+    "isDryRun": false,
+    "destinationHost": "ec2-35-167-207-113.us-west-2.compute.amazonaws.com",
+    "destinationUser": "ubuntu",
+    "destinationPassword": "",
+    "destinationPath": "/var/www/vhosts/puttputtplanet-q",
+    "excludeFiles": "./bin/exclude-puttputtplanet-files.txt",
+    "sourcePath": "./",
+    "sshKeyFile": "~/.ssh/varyn-aws.pem",
+    "debug": true,
+    "logFile": "data/logs/deploy.log"
+}
