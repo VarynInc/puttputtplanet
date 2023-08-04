@@ -18,6 +18,15 @@ require_once '../services/common.php';
     <META NAME="Copyright" content="Copyright © 2010 Varyn, Inc. All rights reserved.">
     <link href="css/bootstrap.min.css" rel="stylesheet">
     <link href="css/main.css" rel="stylesheet" type="text/css">
+    <script type="application/ld+json">
+    {
+      "@context" : "https://schema.org",
+      "@type" : "WebSite",
+      "name" : "Putt Putt Planet",
+      "alternateName" : "inXys",
+      "url" : "https://puttputtplanet.com/"
+    }
+    </script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Q1Z42K63D7"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
