@@ -18,7 +18,7 @@
     "use strict";
 
     var enginesis = {
-        VERSION: "2.6.17",
+        VERSION: "2.6.18",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -243,7 +243,7 @@
      * @param {object} object Value to save under key.
      */
     function saveObjectWithKey(key, object) {
-        if (key != null && object != null && typeof window.localStorage !== "undefined") {
+        if (key != null && object != null && typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
             window.localStorage[key] = JSON.stringify(object);
         }
     }
@@ -253,7 +253,7 @@
      * @param {string} key Key to identify object.
      */
     function removeObjectWithKey(key) {
-        if (key != null && typeof window.localStorage !== "undefined") {
+        if (key != null && typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
             window.localStorage.removeItem(key);
         }
     }
@@ -267,7 +267,7 @@
         var jsonData,
             object = null;
 
-        if (key != null && typeof window.localStorage !== "undefined") {
+        if (key != null && typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
             jsonData = window.localStorage[key];
             if (jsonData != null) {
                 object = JSON.parse(jsonData);
@@ -307,7 +307,7 @@
     function refreshTokenAndReissueRequest(enginesisResult) {
         return new Promise(function(resolve) {
             if (_getRefreshToken() !== null) {
-                enginesis.sessionRefresh(_getRefreshToken(), null)
+                enginesisContext.sessionRefresh(_getRefreshToken(), null)
                 .then(function(sessionRefreshResult) {
                     debugLog("refreshTokenAndReissueRequest users authentication has been refreshed. " + sessionRefreshResult.toString());
                     // Reissue original request
@@ -372,7 +372,7 @@
                     success: (errorCode == "" || errorCode == "NO_ERROR") ? "1" : "0",
                     message: errorCode,
                     extended_info: errorMessage
-                }    
+                }
             }
         };
     }
@@ -509,7 +509,7 @@
         i=B(Y)+B(X)+B(W)+B(V);
         return i.toLowerCase();
     }
- 
+
     /**
      * URL safe version of blowfish encrypt and decrypt algorithms.
      * enginesis.blowfish.encryptString(data, key)
@@ -970,7 +970,7 @@
                 if (isValid) {
                     // game session is good but the user must refresh their authentication
                     debugLog("sessionVerifyGameHash Session expired but we think we can refresh it.");
-                    enginesis.sessionRefresh(_getRefreshToken(), null)
+                    enginesisContext.sessionRefresh(_getRefreshToken(), null)
                     .then(function(enginesisResult) {
                         debugLog("sessionVerifyGameHash users authentication has been refreshed. " + enginesisResult.toString());
                     }, function(enginesisError) {
@@ -1068,7 +1068,7 @@
             }
             if (coerceBoolean(sessionInfo.tokenExpired) && ! isEmpty(enginesis.refreshToken)) {
                 // When the server says the token is expired and we have a refresh token, we can request a fresh auth token.
-                enginesis.sessionRefresh(enginesis.refreshToken, null);
+                enginesisContext.sessionRefresh(enginesis.refreshToken, null);
             }
         }
         enginesis.siteResources.baseURL = sessionInfo.siteBaseUrl || "";
@@ -1349,7 +1349,7 @@
      */
     function sendNodeRequest(serviceName, enginesisParameters, overRideCallBackFunction) {
         if (enginesis.nodeRequest == null) {
-            if (typeof window.fetch !== "undefined") {
+            if (typeof window !== "undefined" && typeof window.fetch !== "undefined") {
                 enginesis.nodeRequest = window.fetch;
             } else {
                 throw new Error("enginesis.nodeRequest is not set in the node.js environment");
@@ -1422,7 +1422,7 @@
                 const serviceName = enginesisParameters.fn;
                 const overRideCallBackFunction = enginesisParameters.overRideCallBackFunction;
                 let errorMessage;
-    
+
                 if (enginesis.isNodeBuild) {
                     sendNodeRequest(serviceName, enginesisParameters, function (enginesisResult) {
                         callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
@@ -1892,11 +1892,15 @@
         function decode(s) {
             return decodeURIComponent(s.replace(/\+/g, " "));
         }
-    
+
         if ( ! urlParameterString && enginesis.isBrowserBuild) {
             queryString = window.location.search.substring(1);
         } else {
-            queryString = urlParameterString;
+            if (urlParameterString) {
+                queryString = urlParameterString;
+            } else {
+                return result;
+            }
         }
         if (queryString[0] == "?") {
             queryString = queryString.substring(1);
@@ -1913,7 +1917,7 @@
      * @returns {string} Contents of cookie stored with key.
      */
     function cookieGet (key) {
-        if (typeof window.document !== "undefined" && key) {
+        if (typeof window !== "undefined" && key) {
             return decodeURIComponent(window.document.cookie.replace(new RegExp("(?:(?:^|.*;)\\s*" + encodeURIComponent(key).replace(/[\-\.\+\*]/g, "\\$&") + "\\s*\\=\\s*([^;]*).*$)|^.*$"), "$1")) || null;
         } else {
             return null;
@@ -1980,7 +1984,7 @@
                 + sameSite + "; "
                 + (isSecure ? "Secure;" : "");
         }
-        if (typeof window.document === "undefined") {
+        if (typeof window === "undefined" || typeof window.document === "undefined") {
             // If the document object is undefined then we are running in Node.
             return cookieData;
         }
@@ -2232,7 +2236,7 @@
                 } else {
                     if (sessionExpired) {
                         debugLog("verifyUserSessionInfo Session expired but we think we can refresh it.");
-                        enginesis.sessionRefresh(_getRefreshToken(), null)
+                        enginesisContext.sessionRefresh(_getRefreshToken(), null)
                         .then(function() {
                             isRefreshed = true;
                             resolve(isRefreshed);
@@ -2616,7 +2620,11 @@
         restoreUserSession(authToken);
         if (restoreServiceQueue()) {
             // defer the queue processing
-            window.setTimeout(restoreOnline, 500);
+            if (enginesis.isBrowserBuild) {
+                window.setTimeout(restoreOnline, 500);
+            } else {
+                setTimeout(restoreOnline, 500);
+            }
         }
         return isValidOperationalState();
     },
@@ -2825,7 +2833,7 @@
         enginesis.isPaused = false;
         if (enginesis.isUserLoggedIn) {
             // check expiration of the session and refresh if we need to
-            enginesis.sessionRefreshIfExpired()
+            enginesisContext.sessionRefreshIfExpired()
             .then(function(isRefreshed) {
                 debugLog("Session was " + (isRefreshed ? "refreshed" : "OK"));
             })
@@ -2903,7 +2911,7 @@
         }
         return cleanName;
     },
-    
+
     /**
      * Determine if the password is a valid password that will be accepted by the server. Password
      * must be printable characters with no leading or trailing spaces no less than 8 and no longer
@@ -3213,7 +3221,7 @@
             siteMark = enginesis.anonymousUser.userId;
         }
         var parameters = {
-            game_id: isEmpty(gameId) ? enginesis.gameIdGet() : gameId,
+            game_id: isEmpty(gameId) ? enginesisContext.gameIdGet() : gameId,
             gamekey: isEmpty(gameKey) ? enginesis.gameKey : gameKey,
             site_mark: siteMark
         };
@@ -3424,7 +3432,7 @@
             gameConfigId = 0;
         }
         if (typeof gameId === "undefined" || gameId == 0) {
-            gameId = enginesis.gameIdGet();
+            gameId = enginesisContext.gameIdGet();
         }
         if (typeof airDate === "undefined") {
             airDate = "";
@@ -3446,9 +3454,10 @@
      */
     gameTrackingRecord: function (category, action, label, hitData, overRideCallBackFunction) {
         if (enginesis.isBrowserBuild) {
+            const gameIdString = enginesisContext.gameIdGet().toString();
             try {
                 if (isNull(action)) {
-                    action = this.gameIdGet().toString();
+                    action = gameIdString;
                 }
                 if (isNull(label)) {
                     label = "";
@@ -3456,11 +3465,13 @@
                 if (isNull(hitData)) {
                     hitData = "";
                 }
-                // use Google Analytics or Tag Manager if it is there (send event, category, action, label, value)
-                if (window.dataLayer != undefined) {
-                    window.dataLayer.push({"event": category, "gameid": this.gameIdGet().toString(), "action": action, "label": label, "value": hitData});
-                } else if (window.ga != undefined) {
-                    window.ga("send", "event", category, action, label, hitData);
+                if (enginesis.isBrowserBuild) {
+                    // use Google Analytics or Tag Manager if it is there (send event, category, action, label, value)
+                    if (window.dataLayer != undefined) {
+                        window.dataLayer.push({"event": category, "gameid": gameIdString, "action": action, "label": label, "value": hitData});
+                    } else if (window.ga != undefined) {
+                        window.ga("send", "event", category, action, label, hitData);
+                    }
                 }
             } catch (exception) {
                 debugLog("Analytics exception " + exception.toString());
@@ -4077,7 +4088,7 @@
         const gameId = parseInt(game_id, 10) || enginesis.gameId;
         const isFavorite = enginesis.favoriteGames.has(gameId);
         if (typeof callBackFunction === "function" && enginesis.favoriteGamesNextCheck < Date.now()) {
-            enginesis.userFavoriteGamesList()
+            enginesisContext.userFavoriteGamesList()
             .then(function(enginesisResult) {
                 callBackFunction(gameId, enginesis.favoriteGames.has(gameId));
             });
@@ -4153,12 +4164,12 @@
      * @returns {Promise}
      */
     userFavoriteGamesUnassign: function(game_id, overRideCallBackFunction) {
-        game_id = game_id || enginesis.gameId;
-        enginesis.favoriteGames.delete(game_id);
-        var serviceName = "UserFavoriteGamesUnassign";
-        var serviceParameters = {
-            game_id: game_id
+        const gameId = game_id || enginesis.gameId;
+        const serviceName = "UserFavoriteGamesUnassign";
+        const serviceParameters = {
+            game_id: gameId
         };
+        enginesis.favoriteGames.delete(gameId);
         if ( ! enginesis.isUserLoggedIn) {
             const errorCode = "NOT_AUTHENTICATED";
             const errorMessage = "You must log in to update your favorite games.";

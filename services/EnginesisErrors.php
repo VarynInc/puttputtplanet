@@ -226,7 +226,7 @@ $errorCodeTable = [
     EnginesisErrors::NOT_SUBSCRIBED => 'The user or email address provided is not subscribed.',
     EnginesisErrors::NOT_YOUR_COMMENT => 'You do not have the access rights to alter that comment.',
     EnginesisErrors::NO_COMMENT => 'There was no comment provided.',
-    EnginesisErrors::NO_CONTENT => 'There was no content provided to fullfill this operation.',
+    EnginesisErrors::NO_CONTENT => 'There was no content provided to fulfill this operation.',
     EnginesisErrors::NO_MATCHING_ITEM => 'No matching item was identified.',
     EnginesisErrors::NO_VALID_TIME_PERIODS_FOR_GAME => 'No time periods have been defined, or no time periods are currently active for this game.',
     EnginesisErrors::PASSWORD_EXPIRED => 'Your confirmation token has expired.',
@@ -262,15 +262,26 @@ $errorCodeTable = [
 ];
 
 /**
- * @param $status_msg
- * @return mixed
+ * Return a full text description of an error code.
+ * @param string $errorCode Error code to look up in strings table.
+ * @param string $languageCode Return strings of a specific language.
+ * @param boolean $includeErrorCode Include the error code in the error message.
+ * @return string Error message.
  */
-function errorToLocalString($status_msg) {
+function errorToLocalString($errorCode, $languageCode = '', $includeErrorCode = false) {
     global $errorCodeTable;
     global $language_code;
 
-    if (isset($errorCodeTable[$status_msg])) {
-        $status_msg = $errorCodeTable[$status_msg];
+    if (empty($languageCode)) {
+        $languageCode = $language_code;
     }
-    return $status_msg;
+    if (isset($errorCodeTable[$errorCode])) {
+        $errorMessage = $errorCodeTable[$errorCode];
+        if ($includeErrorCode) {
+            $errorMessage .= " ($errorCode)";
+        }
+    } else {
+        $errorMessage = $errorCode;
+    }
+    return $errorMessage;
 }
