@@ -3133,18 +3133,18 @@
      * Parameters are:
      * * `gameName` {string} game folder on server where the game assets are stored. Most of the game queries
      *    (GameGet, GameList, etc) return game_name and this is used as the game folder.
-     * * `width` {integer} optional width, use null to ignore. Server will choose common width.
-     * * `height` {integer} optional height, use null to ignore. Server will choose common height.
-     * * `format` {string} optional image format, use null and server will choose. Otherwise {jpg|png|svg}
+     * * `width` {integer|*} required width, use * for most common width.
+     * * `height` {integer|*} required height, use * for most common height.
+     * * `format` {string} optional image format, default is .png. Otherwise {jpg|png|svg|webp}
      * @returns {string} a URL you can use to load the image.
-     * @todo: this really needs to call a server-side service to perform this resolution as we need to use PHP to determine which files are available and the closest match.
      */
     getGameImageURL: function (parameters) {
+        const defaultImageFormat = "png";
         let gameName = null;
         let width = 0;
         let height = 0;
         let format = null;
-        let defaultImageFormat = ".png";
+        let imagePath = getProtocol() + enginesis.serverHost + "/games/";
 
         if (typeof parameters !== "undefined" && parameters != null) {
             if ( ! isEmpty(parameters.game_name)) {
@@ -3162,29 +3162,36 @@
                 height = parameters.height;
             }
         }
-        if (isEmpty(format)) {
-            format = defaultImageFormat;
-        } else {
-            if (format[0] != ".") {
-                format = "." + format;
-            }
-            if ( ! format.match(/\.(jpg|png|svg)/i)) {
-                format = defaultImageFormat;
-            }
-        }
         if (isEmpty(gameName) && enginesis.gameInfo != null) {
             gameName = enginesis.gameInfo.game_name || "enginesisTestGame";
         }
-        if (gameName == "quiz") {
-            gameName += "/" + (parameters.game_id || enginesis.gameInfo.game_id);
+        if (gameName == "quiz" || gameName.substring(0, 5) == "quiz_") {
+            gameName = "quiz/" + (parameters.game_id || enginesis.gameInfo.game_id);
         }
+        imagePath += gameName + "/images/";
         if (isEmpty(width) || width == "*") {
             width = 600;
         }
         if (isEmpty(height) || height == "*") {
             height = 450;
         }
-        return getProtocol() + enginesis.serverHost + "/games/" + gameName + "/images/" + width + "x" + height + format;
+        if (width == height) {
+            imagePath += width.toString();
+        } else {
+            imagePath += width + "x" + height;
+        }
+        if (isEmpty(format)) {
+            format = defaultImageFormat;
+        } else {
+            if (format[0] == ".") {
+                format = format.substring(1);
+            }
+            if ( ! format.match(/(png|jpg|svg|webp)/i)) {
+                format = defaultImageFormat;
+            }
+        }
+        imagePath += "." + format;
+        return imagePath;
     },
 
     /**
