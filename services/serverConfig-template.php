@@ -15,7 +15,6 @@ define('DEBUG_ACTIVE', false);
 define('DEBUG_SESSION', false);
 define('PUBLISHING_MASTER_PASSWORD', '');
 define('REFRESH_TOKEN_KEY', '');
-define('ADMIN_ENCRYPTION_KEY', '');
 define('COREG_TOKEN_KEY', '');
 define('ENGINESIS_DEVELOPER_API_KEY', '');
 define('ENGINESIS_CMS_API_KEY', '');
