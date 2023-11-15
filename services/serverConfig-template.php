@@ -15,9 +15,9 @@ define('DEBUG_ACTIVE', false);
 define('DEBUG_SESSION', false);
 define('PUBLISHING_MASTER_PASSWORD', '');
 define('REFRESH_TOKEN_KEY', '');
-define('COREG_TOKEN_KEY', '');
-define('ENGINESIS_DEVELOPER_API_KEY', '');
 define('ENGINESIS_CMS_API_KEY', '');
+define('ENGINESIS_DEVELOPER_API_KEY', '');
+define('COREG_TOKEN_KEY', '');
 define('SESSION_REFRESH_HOURS', 4380);     // refresh tokens are good for 6 months
 define('SESSION_REFRESH_INTERVAL', 'P6M'); // refresh tokens are good for 6 months
 define('SESSION_AUTHTOKEN', 'authtok');
