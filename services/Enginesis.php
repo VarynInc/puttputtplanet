@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.6.18');
+    define('ENGINESIS_VERSION', '2.8.2');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -50,7 +50,7 @@ class Enginesis {
     private $m_networkId;
     private $m_userName;
     private $m_userAccessLevel;
-    private $m_favoriteGames;
+    private ?array $m_favoriteGames;
     private $m_favoriteGamesNextCheck;
     private $m_stage;
     private $m_syncId;
@@ -420,8 +420,12 @@ class Enginesis {
     }
 
     /**
-     * Set the CMS key required for secure transactions.
-     * @param string $key
+     * Set the CMS key required for secure transactions. The key is required to send to teh server for
+     * all secured transactions. The admin user name and password are required to generate a
+     * temporary token on behalf of that user to perform a secured transaction.
+     * @param string $key The CMS key assigned to this site id.
+     * @param string $userName The admin user assigned to this site id.
+     * @param string $password The admin user password.
      */
     public function setCMSKey($cmsKey, $userName = '', $password = '') {
         if (is_array($cmsKey)) {
@@ -2427,20 +2431,34 @@ class Enginesis {
      */
     public function registeredUserDelete ($userId = null) {
         $service = 'RegisteredUserDelete';
-        $isSecure = true;
+        $isSecure = false;
         $parameters = null;
         if ( ! empty($this->m_siteUserId) && $this->m_networkId != 1) {
+            $isSecure = true;
             $parameters = [
                 'user_id_to_delete' => 0,
                 'site_user_id' => $this->m_siteUserId,
                 'network_id' => $this->m_networkId
             ];
-        } elseif ($this->isValidId($userId)) {
-            $parameters = [
-                'user_id_to_delete' => $this->m_userId,
-                'site_user_id' => '',
-                'network_id' => 0
-            ];
+        } else {
+            if ($this->isValidId($userId)) {
+                if ($userId != $this->m_userId && $this->isLoggedInUser()) {
+                    $isSecure = true;
+                } else {
+                    // error cannot delete just any user
+                    $userId = null;
+                }
+            } elseif ($this->isLoggedInUser()) {
+                $userId = $this->m_userId;
+                $isSecure = true;
+            }
+            if ($userId != null) {
+                $parameters = [
+                    'user_id_to_delete' => $userId,
+                    'site_user_id' => '',
+                    'network_id' => 0
+                ];
+            }
         }
         if ($parameters != null) {
             $enginesisResponse = $this->callServerAPI($service, $parameters, $isSecure);
@@ -2892,7 +2910,7 @@ class Enginesis {
 
     /**
      * Helper function to manage the local user favorite games cache.
-     * @param EnginesisResponse $serverResponse A list of the current favorite games delivered
+     * @param array $serverResponse A list of the current favorite games delivered
      *   from the server as a response to a favorite games query.
      */
     private function updateUserFavoriteGamesCache($serverResponse) {
@@ -2917,7 +2935,7 @@ class Enginesis {
         if ( ! ($this->m_favoriteGames != null
              && $this->m_favoriteGamesNextCheck != null
              && $this->m_favoriteGamesNextCheck < (time() + 300))) {
-            $response = $this->userFavoriteGamesList();
+            $this->userFavoriteGamesList();
         }
         return in_array($verifiedGameId, $this->m_favoriteGames);
     }

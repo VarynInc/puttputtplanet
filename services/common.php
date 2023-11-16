@@ -636,8 +636,7 @@ function getCurrentDomain() {
     return
         'http' . (isset($_SERVER['HTTPS']) ? 's' : '')
         . '://'
-        . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN)
-        . '/';
+        . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN);
 }
 
 /**
@@ -1424,9 +1423,9 @@ function profanityFilter (&$strTest) {
  * In order to provide some flexibility with dates, our API will accept a PHP date, a Unix timestamp,
  * a date string, or null. This function will try to figure our what date was provided and convert what ever
  * it is into a valid MySQL date string. If null it returns the current date-time.
- * @param $phpDate mixed One of PHP Date, integer, a string, or null.
- * @param $includeTime boolean include the time in the return value.
- * @return string a valid MySQL date
+ * @param mixed $phpDate mixed One of PHP Date, integer, a string, or null.
+ * @param boolean $includeTime True to include the time in the return value.
+ * @return string A valid MySQL date
  */
 function dateToMySQLDate ($phpDate, $includeTime = true) {
     if ($includeTime) {
@@ -1445,23 +1444,37 @@ function dateToMySQLDate ($phpDate, $includeTime = true) {
     }
 }
 
+/**
+ * Convert MySQL date to Unix timestamp.
+ * @param string $mysqlDate A MySQL date string in the form YYYY-MM-DD.
+ * @return int A unix timestamp.
+ */
 function MySQLDateToDate ($mysqlDate) {
-    // Convert MySQL date to php Date
     return strtotime($mysqlDate);
 }
 
 /**
  * Given a MySQL date string return a human readable date string.
- * @param $date
- * @return bool|string
+ * MySQL date is YYYY-mm-dd convert it to mm/dd/yyyy.
+ * @todo: this needs to be locale aware.
+ * @param string $mysqlDate A MySQL date string YYYY-mm-dd.
+ * @return string Formatted date mm/dd/yyyy.
  */
 function MySQLDateToHumanDate ($mysqlDate) {
-    // MySQL date is YYYY-mm-dd convert it to mm/dd/yyyy
+    if (empty($mysqlDate) || $mysqlDate == 'NULL') {
+        $mysqlDate = DateToMySQLDate(null, false);
+    }
     return substr($mysqlDate, 5, 2) . '/' . substr($mysqlDate, 8, 2) . '/' . substr($mysqlDate, 0, 4);
 }
 
+/**
+ * Convert a human readable date format mm/dd/yyyy to a MySQL date format of YYYY-mm-dd.
+ * It also tries to deal with mm/dd/yy, I'm not sure how useful that is anymore (it was back in 1999 when we wrote this).
+ * @todo: this needs to be locale aware.
+ * @param string $humanDate A date string in the form mm/dd/yyy.
+ * @return string A MySQL date in the form YYY-MM-DD.
+ */
 function HumanDateToMySQLDate ($humanDate) {
-    // Convert mm/dd/yyyy into yyyy-mm-dd
     $dateParts = explode('/', $humanDate, 3);
     if (strlen($dateParts[0]) < 2) {
         $dateParts[0] = '0' . $dateParts[0];
@@ -1481,8 +1494,8 @@ function HumanDateToMySQLDate ($humanDate) {
 
 /**
  * Determine if the color value is considered a dark color.
- * @param $htmlHexColorValue
- * @return bool
+ * @param string $htmlHexColorValue An HTML color value such as #445566 or just 445566.
+ * @return boolean True if the color value is considered dark.
  */
 function isDarkColor ($htmlHexColorValue) {
     $htmlHexColorValue = str_replace('#', '', $htmlHexColorValue);
@@ -1810,7 +1823,7 @@ $enginesis->setCMSKey(ENGINESIS_CMS_API_KEY, $CMSUserLogins[0]['user_name'], $CM
 $serverName = $enginesis->getServerName();
 $serverStage = $enginesis->getServerStage();
 $enginesisServer = $enginesis->getServiceRoot();
-// turn on errors for all stages except LIVE TODO: Remove from above when we are going live.
+// turn on errors for all stages except LIVE
 setErrorReporting($serverStage != '');
 $isLoggedIn = $enginesis->isLoggedInUser();
 if ($isLoggedIn) {
