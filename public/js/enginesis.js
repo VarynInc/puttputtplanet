@@ -18,7 +18,7 @@
     "use strict";
 
     var enginesis = {
-        VERSION: "2.8.2",
+        VERSION: "2.8.3",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -947,10 +947,11 @@
             hash = sessionMakeGameHash({
                 siteId: enginesis.siteId,
                 gameId: enginesis.gameId,
-                userId: coerceNotEmpty(userInfo.user_id, 0),
+                userId: coerceNotNull(userInfo.user_id, 0),
                 userName: coerceNotEmpty(userInfo.user_name, ""),
                 siteUserId: coerceNotEmpty(userInfo.site_user_id, ""),
-                accessLevel: coerceNotEmpty(userInfo.access_level, 0),
+                networkId: coerceNotNull(userInfo.network_id, 1),
+                accessLevel: coerceNotNull(userInfo.access_level, 0),
                 siteKey: enginesis.developerKey
             });
             isValid = cr == hash;
@@ -963,6 +964,7 @@
                     userId: 0,
                     userName: "",
                     siteUserId: "",
+                    networkId: 1,
                     accessLevel: 10,
                     siteKey: enginesis.developerKey
                 });
@@ -1158,17 +1160,15 @@
      */
     function sessionMakeHash(userInfo) {
         userInfo = userInfo || {};
-        var loggedInUserInfo = enginesis.loggedInUserInfo || {};
-        var siteId = enginesis.siteId;
-        var userId = coerceNotEmpty(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
-        var userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
-        var accessLevel = coerceNotEmpty(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
-        var siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
-        var dayStamp = userInfo.dayStamp || sessionDayStamp();
-        var hashClear = "s=" + siteId + "&u=" + userId + "&d=" + dayStamp + "&n=" + userName + "&i=" + siteUserId + "&l=" + accessLevel + "&k=" + enginesis.developerKey;
-        var hash = md5(hashClear);
-        debugLog("sessionMakeHash from " + hashClear + " yields " + hash);
-        return hash;
+        const loggedInUserInfo = enginesis.loggedInUserInfo || {};
+        const siteId = enginesis.siteId;
+        const userId = coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
+        const userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
+        const accessLevel = coerceNotNull(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
+        const siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
+        const networkId = coerceNotNull(userInfo.networkId, userInfo.network_id, loggedInUserInfo.network_id, 1);
+        const dayStamp = userInfo.dayStamp || sessionDayStamp();
+        return md5(`s=${siteId}&u=${userId}&d=${dayStamp}&n=${userName}&i=${siteUserId}&w=${networkId}&l=${accessLevel}&k=${enginesis.developerKey}`);
     }
 
     /**
@@ -1183,15 +1183,16 @@
      */
     function sessionMakeGameHash(userInfo) {
         userInfo = userInfo || {};
-        var loggedInUserInfo = enginesis.loggedInUserInfo || {};
-        var siteId = enginesis.siteId;
-        var userId = coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
-        var userName = coerceNotNull(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
-        var accessLevel = coerceNotNull(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
-        var siteUserId = coerceNotNull(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
-        var gameId = userInfo.gameId || enginesis.gameId;
-        var dayStamp = userInfo.dayStamp || sessionDayStamp();
-        var siteMark = 0;
+        const loggedInUserInfo = enginesis.loggedInUserInfo || {};
+        const siteId = enginesis.siteId;
+        const userId = coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
+        const userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
+        const accessLevel = coerceNotNull(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
+        const siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
+        const networkId = coerceNotNull(userInfo.networkId, userInfo.network_id, loggedInUserInfo.network_id, 1);
+        const gameId = userInfo.gameId || enginesis.gameId;
+        const dayStamp = userInfo.dayStamp || sessionDayStamp();
+        let siteMark = 0;
 
         if (userId == 0) {
             // Use the site mark only if we do not have a user id
@@ -1201,10 +1202,7 @@
                 }
             }
         }
-        var hashClear = "s=" + siteId + "&u=" + userId + "&d=" + dayStamp + "&n=" + userName + "&g=" + gameId + "&i=" + siteUserId + "&l=" + accessLevel + "&m=" + siteMark + "&k=" + enginesis.developerKey;
-        var hash = md5(hashClear);
-        debugLog("sessionMakeGameHash from " + hashClear + " yields " + hash);
-        return hash;
+        return md5(`s=${siteId}&u=${userId}&d=${dayStamp}&n=${userName}&g=${gameId}&i=${siteUserId}&w=${networkId}&l=${accessLevel}&m=${siteMark}&k=${enginesis.developerKey}`);
     }
 
     /**
@@ -2159,6 +2157,7 @@
                 userId: userInfoSaved.userId,
                 userName: userInfoSaved.userName,
                 siteUserId: userInfoSaved.siteUserId || "",
+                networkId: userInfoSaved.networkId || 1,
                 accessLevel: userInfoSaved.accessLevel,
                 siteKey: enginesis.developerKey
             });
@@ -2226,6 +2225,7 @@
                     userId: loggedInUserInfo.user_id,
                     userName: loggedInUserInfo.user_name,
                     siteUserId: loggedInUserInfo.site_user_id || "",
+                    networkId: loggedInUserInfo.network_id || 1,
                     accessLevel: loggedInUserInfo.access_level,
                     siteKey: enginesis.developerKey
                 });
@@ -3912,7 +3912,7 @@
      * In the callback function you receive a response if the login succeeds or not. A successful
      * login provides information about the user.
      * @param {string} userName The user name or email to identify the user.
-     * @param {string} password The user's password which shold conform to the password rules.
+     * @param {string} password The user's password which should conform to the password rules.
      * @returns {Promise} A promise that resolves with the server's response.
      */
     userLogin: function(userName, password, overRideCallBackFunction) {

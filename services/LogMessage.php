@@ -346,13 +346,16 @@ class LogMessage
     }
 
     /**
-     * Helper function to convert a parmaeters key/value array into a printable string.
+     * Helper function to convert a parameters key/value array into a printable string.
      */
     public static function parametersToString($parameters) {
         $parametersString = '';
         foreach ($parameters as $key => $value) {
             if ($key == 'authtok' || strpos($key, 'password') !== false) {
                 $value = 'XXXXXX';
+            }
+            if (is_array($value)) {
+                $value = '[' . implode(',', $value) . ']';
             }
             $parametersString .= (strlen($parametersString) == 0 ? '' : ', ') . $key . '=' . $value;
         }
