@@ -1269,79 +1269,85 @@ class Enginesis {
     }
 
     /**
-     * When using the Blowfish encryption algorithm, data must be padded to 8 byte blocks.
-     * @param string A byte array to pad.
-     * @return string The input with padding added to the end if necessary.
-     */
-    private function blowfishPad ($text) {
-        $imod = 8 - (strlen($text) % 8);
-        for ($i = 0; $i < $imod; $i ++) {
-            $text .= chr($imod);
-        }
-        return $text;
-    }
-
-    /**
-     * When using the Blowfish encryption algorithm, data must be padded to 8 byte blocks.
-     * This function undoes any padding.
-     * @param string A byte array that may have been padded.
-     * @return string The input with padding removed if necessary.
-     */
-    private function blowfishUnpad ($text) {
-        $textLen = strlen($text);
-        if ($textLen > 0) {
-            $padLen = ord($text[$textLen - 1]);
-            if ($padLen > 0 && $padLen <= 8) {
-                return substr($text, 0, $textLen - $padLen);
-            }
-        }
-        return $text;
-    }
-
-    /**
      * Encrypt a string of data with a key.
-     * @param $data {string} A clear string of data to encrypt.
-     * @param $key {string} The encryption key.
-     * @return {string} a base-64 representation of the encrypted data.
+     * @param string $data A clear string of data to encrypt.
+     * @param string $key The encryption key. This should be a string of 32 hex digits.
+     * @return string a base-64 representation of the encrypted data.
      */
     private function encryptString($data, $key) {
-        $keyLength = strlen($key);
-        if ($keyLength < 16) {
-            $key = str_repeat($key, ceil(16/$keyLength));
+        if (empty($data) || empty($key)) {
+            return '';
         }
-        return base64URLEncode(openssl_encrypt(blowfishPad($data), 'BF-ECB', pack('H*', $key), OPENSSL_RAW_DATA | OPENSSL_NO_PADDING));
+        $sslOptions = 0;
+        $keyLength = strlen($key);
+        if ($keyLength < 32) {
+            $key = str_repeat($key, ceil(32 / $keyLength));
+        }
+        $iv = substr($key, 3, 16);
+        $encrypted = openssl_encrypt($data, 'AES-256-CBC', $key, $sslOptions, $iv);
+        if ($encrypted !== false) {
+            return $encrypted;
+        }
+        return '';
     }
 
     /**
      * Decrypt a string of data that was encrypted with `encryptString()` using the same key.
-     * @param $data {string} An encrypted string of data to decrypt.
-     * @param $key {string} The encryption key.
-     * @return {string} the clear string that was originally encrypted.
+     * @param string $data An encrypted string of data to decrypt.
+     * @param string $key The encryption key that was used to encrypt the data.
+     * @return string The clear string that was originally encrypted, or empty string if there was an error.
      */
     private function decryptString($data, $key) {
-        $keyLength = strlen($key);
-        if ($keyLength < 16) {
-            $key = str_repeat($key, ceil(16/$keyLength));
+        if (empty($data) || empty($key)) {
+            return '';
         }
-        return blowfishUnpad(openssl_decrypt(base64URLDecode($data), 'BF-ECB', pack('H*', $key), OPENSSL_RAW_DATA | OPENSSL_NO_PADDING));
+        $sslOptions = 0;
+        $keyLength = strlen($key);
+        if ($keyLength < 32) {
+            $key = str_repeat($key, ceil(32 / $keyLength));
+        }
+        $iv = substr($key, 3, 16);
+        return openssl_decrypt($data, 'AES-256-CBC', $key, $sslOptions, $iv);
     }
 
     /**
-     * Decode a base-64 string. This function also replaces base64 chars that are not URL safe.
-     * @param string A byte array that was base-64 encoded with `base64URLEncode($input)`.
-     * @return string The input string decoded.
+     * Decode a base64 encoded string into its binary representation.
+     * @param string $data A string of translated base-64 characters to translate back to binary.
+     * @return string A binary string.
      */
-    private function base64URLDecode($data) {
-        return base64_decode(strtr($data, ['-' => '+', '_' => '/', '~' => '='])); // '-_~', '+/='));
+    public function base64Decode($data) {
+        return base64_decode(base64URLDecode($data));
     }
 
     /**
-     * Encode a string|byte array into base-64. This function also replaces base64 chars that are not URL safe.
-     * @param string A string or a byte array.
-     * @return string The input string encoded and the unsafe characters are changed to `+` => `-` and `/` => `_`.
+     * Replace base-64 chars that are not URL safe. This will help transmit a base-64 string
+     * over the internet by translating '-_~' into '+/='.
+     * @param string $data A string of translated base-64 characters to translate back to true base-64.
+     * @return string Translates '-_~' found in $data to '+/='.
      */
-    private function base64URLEncode($data) {
-        return strtr(base64_encode($data), ['+' => '-', '/' => '_', '=' => '~']); // '+/=', '-_~');
+    public function base64URLDecode($data) {
+        return strtr($data, ['-' => '+', '_' => '/', '~' => '=']);
+    }
+
+    /**
+     * Translate a string of data (possibly binary) into its base-64 representation. In
+     * additions, this also makes the string URL safe by translating '+/=' into '-_~'.
+     * Use `base64URLDecode` to get it back to true base-64.
+     * @param string $data A string to translate into base-64 representation.
+     * @return string Translated string represented as base-64 with URL safe ('+/=' is '-_~').
+     */
+    public function base64Encode($data) {
+        return base64URLEncode(base64_encode($data));
+    }
+
+    /**
+     * Replace base-64 chars that are not URL safe. This will help transmit a base-64 string
+     * over the internet by translating '+/=' into '-_~'.
+     * @param string $data A string of base-64 characters to translate.
+     * @return string Translates '+/=' found in $data to '-_~'.
+     */
+    public function base64URLEncode($data) {
+        return strtr($data, ['+' => '-', '/' => '_', '=' => '~']);
     }
 
     /**
