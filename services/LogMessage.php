@@ -50,7 +50,7 @@ class LogMessage
         // determines where there is a secured writable area we can manipulate file storage
         // Because this is a static function we don't yet have our constant defined SERVER_DATA_PATH
         $logSubPath = '/data/logs/';
-        if (isset($_SERVER['DOCUMENT_ROOT']) && strlen($_SERVER['DOCUMENT_ROOT']) > 0) {
+        if ( ! empty($_SERVER['DOCUMENT_ROOT'])) {
             // when running on a web server, we're in the public folder, go up one level.
             $serverRootPath = dirname($_SERVER['DOCUMENT_ROOT']);
         } else {

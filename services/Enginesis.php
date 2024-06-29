@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.8.3');
+    define('ENGINESIS_VERSION', '2.8.4');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -150,7 +150,7 @@ class Enginesis {
         $guessRootPath = $_SERVER['DOCUMENT_ROOT'] . '/';
         $this->m_serverPaths = [
             'DATA'     => defined('SERVER_DATA_PATH') ? SERVER_DATA_PATH : $guessRootPath . '../data/',
-            'PRIVATE'  => defined('PRIVATE_DATA_PATH') ? PRIVATE_DATA_PATH : $guessRootPath . '../private/',
+            'PRIVATE'  => defined('SERVER_PRIVATE_PATH') ? SERVER_PRIVATE_PATH : $guessRootPath . '../private/',
             'PUBLIC'   => $guessRootPath,
             'SERVICES' => defined('SERVICE_ROOT') ? SERVICE_ROOT : $guessRootPath . '../services/'
         ];
@@ -565,6 +565,10 @@ class Enginesis {
         } else {
             $server = gethostname();
         }
+        if (strpos($server, '.') === false) {
+            // treat this instance as a localhost
+            $server = 'https://' . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN);
+        }
         return $server;
     }
 
@@ -621,7 +625,7 @@ class Enginesis {
      * www.enginesis-q.com and the $targetStage is -l, return www.enginesis-l.com.
      * @param string $targetStage one of -l, -d, -x, -q or '' for live.
      * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
-     * @return string The requalified host name.
+     * @return string The qualified host name.
      */
     public function domainForTargetStage($targetStage, $hostName = null) {
         if (empty($hostName)) {
@@ -651,7 +655,9 @@ class Enginesis {
         if (strlen($hostName) == 0) {
             $hostName = $this->getServerName();
         }
-        if (preg_match('/-[dlqx]\./i', $hostName, $matchedStage)) {
+        if (strpos($hostName, '.') === false) {
+            $targetPlatform = '-l';
+        } elseif (preg_match('/-[dlqx]\./i', $hostName, $matchedStage)) {
             $targetPlatform = substr($matchedStage[0], 0, 2);
         }
         return $targetPlatform;
@@ -1623,7 +1629,7 @@ class Enginesis {
             $curlError = curl_errno($ch);
             $succeeded = $curlError == 0 && ($contents !== false && strlen($contents) > 0);
             if ( ! $succeeded) {
-                $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. cURL error ' .$curlError . ': ' . curl_error($ch);
+                $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. cURL error ' . $curlError . ': ' . curl_error($ch);
                 $this->debugCallback($errorInfo, __FILE__, __LINE__);
                 $contents = $this->makeErrorResponse(EnginesisErrors::SYSTEM_ERROR, $errorInfo, $parameters);
             }

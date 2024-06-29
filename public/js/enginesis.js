@@ -10,15 +10,11 @@
  * @exports enginesis
  **/
 
-/**
- * Construct the singleton Enginesis object with initial parameters. Call `init` before any other function.
- * * @returns {object} Enginesis object to perform operations on.
- */
 (function enginesis (global) {
     "use strict";
 
-    var enginesis = {
-        VERSION: "2.8.3",
+    const enginesis = {
+        VERSION: "2.11.2",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -165,8 +161,8 @@
      * @returns {any} The first parameter encountered, in order, that is not an empty value.
      */
     function coerceNotEmpty() {
-        var result;
-        var numberOfArguments = arguments.length;
+        const numberOfArguments = arguments.length;
+        let result;
         if (numberOfArguments == 0) {
             result = null;
         } else if (numberOfArguments == 1) {
@@ -194,8 +190,8 @@
      * @returns {any} The first parameter encountered, in order, that is not a null value.
      */
     function coerceNotNull() {
-        var result;
-        var numberOfArguments = arguments.length;
+        const numberOfArguments = arguments.length;
+        let result;
         if (numberOfArguments == 0) {
             result = null;
         } else if (numberOfArguments == 1) {
@@ -264,11 +260,10 @@
      * @returns {object} The data that was saved under key. If key was never previously saved then null is returned.
      */
     function loadObjectWithKey(key) {
-        var jsonData,
-            object = null;
+        let object = null;
 
         if (key != null && typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
-            jsonData = window.localStorage[key];
+            const jsonData = window.localStorage[key];
             if (jsonData != null) {
                 object = JSON.parse(jsonData);
             }
@@ -309,10 +304,9 @@
             if (_getRefreshToken() !== null) {
                 enginesisContext.sessionRefresh(_getRefreshToken(), null)
                 .then(function(sessionRefreshResult) {
-                    debugLog("refreshTokenAndReissueRequest users authentication has been refreshed. " + sessionRefreshResult.toString());
                     // Reissue original request
-                    var serviceName = enginesisResult.results.passthru.fn;
-                    var parameters = enginesisResult.results.passthru;
+                    const serviceName = enginesisResult.results.passthru.fn;
+                    const parameters = enginesisResult.results.passthru;
                     sendRequest(serviceName, parameters, null)
                     .then(function(reissueResult) {
                         resolve(reissueResult);
@@ -418,7 +412,7 @@
      * @returns {Promise} Resolves with an enginesisResult object when the result pre-process is complete.
      */
     function preprocessEnginesisResult(enginesisResult) {
-        return new Promise(function(resolve, reject) {
+        return new Promise(function(resolve) {
             var serviceEndPoint = enginesisResult.fn;
             // Handle an expired token here, issue a SessionRefresh, and then re-issue the original request
             if (resultIsExpiredToken(enginesisResult)) {
@@ -447,6 +441,66 @@
             }
             resolve(enginesisResult);
         });
+    }
+
+    /**
+     * Convert a binary byte array into its base 64 representation. This will handle
+     * any type of array buffer, converting it to unsigned 8 bit integer, and then
+     * mapping each 64 bit string to its base 64 representation. See also `base64ToArrayBuffer`.
+     * @param {ArrayBuffer} arrayBuffer An array of bytes.
+     * @return {String} The base 64 string representation of the input array.
+     */
+    function arrayBufferToBase64(arrayBuffer) {
+        return window.btoa(String.fromCharCode.apply(null, new Uint8Array(arrayBuffer)));
+    }
+
+    /**
+     * Convert a base 64 string to a binary byte array. This will convert it to unsigned
+     * 8 bit integer array. This is the complement to `arrayBufferToBase64`.
+     * @param {String} base64String A string of base 64 data.
+     * @return {ArrayBuffer} The binary representation of the base 64 string.
+     */
+    function base64ToArrayBuffer(base64String) {
+        return Uint8Array.from(atob(base64String), function(char) {
+            return char.charCodeAt(0);
+        });
+    }
+
+    /**
+     * Replace base-64 chars that are not URL safe. This will help transmit a base 64 string
+     * over the internet by translating '+/=' into '-_~'.
+     * @param {string} data A string of base 64 characters to translate.
+     * @return {string} Translates '+/=' found in data to '-_~'.
+     */
+    function base64URLEncode(data) {
+        return data
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=/g, "~");
+    }
+
+    /**
+     * Replace base-64 chars that are not URL safe. This will help transmit a base 64 string
+     * over the internet by translating '-_~' into '+/='.
+     * @param {string} data A string of translated base 64 characters to translate back to true base-64.
+     * @return {string} Translates '-_~' found in $data to '+/='.
+     */
+    function base64URLDecode(data) {
+        return data
+        .replace(/-/g, "+")
+        .replace(/_/g, "/")
+        .replace(/~/g, "=");
+    }
+
+    /**
+     * Convert a string into its binary equivalent. This takes each byte of the string
+     * and converts it to its binary value (i.e. code point.)
+     * @param {String} inputString A string to convert to binary.
+     * @returns {Uint8Array} The binary representation of the input string.
+     */
+    function stringToByteArray(inputString) {
+        const utf8Encode = new TextEncoder();
+        return utf8Encode.encode(inputString);
     }
 
     /**
@@ -511,506 +565,23 @@
     }
 
     /**
-     * URL safe version of blowfish encrypt and decrypt algorithms.
-     * enginesis.blowfish.encryptString(data, key)
-     * enginesis.blowfish.decryptString(data, key)
-     * Encrypted string is the URL-safe escaped version of base-64: translates +/= to -_~
-     * Data must be string.
-     * Key must be hex digits represented as string "0123456789abcdef"
-     * Uses ECB mode only.
-     */
-    const blowfishWrapper = (function () {
-        var crypto={};
-        var base64={};
-        var p="=";
-        var tab="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-        base64.encode=function(ba){
-            var s=[], l=ba.length;
-            var rm=l%3;
-            var x=l-rm;
-            for (var i=0; i<x;){
-                var t=ba[i++]<<16|ba[i++]<<8|ba[i++];
-                s.push(tab.charAt((t>>>18)&0x3f));
-                s.push(tab.charAt((t>>>12)&0x3f));
-                s.push(tab.charAt((t>>>6)&0x3f));
-                s.push(tab.charAt(t&0x3f));
-            }
-            switch(rm){
-                case 2:{
-                    var t=ba[i++]<<16|ba[i++]<<8;
-                    s.push(tab.charAt((t>>>18)&0x3f));
-                    s.push(tab.charAt((t>>>12)&0x3f));
-                    s.push(tab.charAt((t>>>6)&0x3f));
-                    s.push(p);
-                    break;
-                }
-                case 1:{
-                    var t=ba[i++]<<16;
-                    s.push(tab.charAt((t>>>18)&0x3f));
-                    s.push(tab.charAt((t>>>12)&0x3f));
-                    s.push(p);
-                    s.push(p);
-                    break;
-                }
-            }
-            return s.join("");
-        };
-
-        base64.decode=function(str){
-            var s=str.split(""), out=[];
-            var l=s.length;
-            while(s[--l]==p){ }
-            for (var i=0; i<l;){
-                var t=tab.indexOf(s[i++])<<18;
-                if(i<=l){ t|=tab.indexOf(s[i++])<<12 };
-                if(i<=l){ t|=tab.indexOf(s[i++])<<6 };
-                if(i<=l){ t|=tab.indexOf(s[i++]) };
-                out.push((t>>>16)&0xff);
-                out.push((t>>>8)&0xff);
-                out.push(t&0xff);
-            }
-            while(out[out.length-1]==0){ out.pop(); }
-            return out;
-        };
-
-        function arrayMapWithHoles(arr, callback, thisObject, Ctr){
-            var i = 0, l = arr && arr.length || 0, out = new (Ctr || Array)(l);
-            if(l && typeof arr == "string") arr = arr.split("");
-            if(typeof callback == "string") callback = cache[callback] || buildFn(callback);
-            if(thisObject){
-                for(; i < l; ++i){
-                    out[i] = callback.call(thisObject, arr[i], i, arr);
-                }
-            }else{
-                for(; i < l; ++i){
-                    out[i] = callback(arr[i], i, arr);
-                }
-            }
-            return out;
-        };
-
-        function stringTranslate(string, undesired, desired) {
-            var i, char, found, length, result = "";
-            if (typeof string !== "string" || string.length < 1 || ! Array.isArray(undesired) || ! Array.isArray(desired) || undesired.length != desired.length) {
-                return string;
-            }
-            length = string.length;
-            for (i = 0; i < length; i ++) {
-                char = string.charAt(i);
-                found = undesired.indexOf(char);
-                if (found >= 0) {
-                    char = desired[found];
-                }
-                result += char;
-            }
-            return result;
-        }
-
-        crypto.blowfish = new function(){
-            var POW8=Math.pow(2,8);
-            var POW16=Math.pow(2,16);
-            var POW24=Math.pow(2,24);
-            var iv=null;
-            var boxes={
-                p:[
-                    0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0, 0x082efa98, 0xec4e6c89,
-                    0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c, 0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917,
-                    0x9216d5d9, 0x8979fb1b
-                ],
-                s0:[
-                    0xd1310ba6, 0x98dfb5ac, 0x2ffd72db, 0xd01adfb7, 0xb8e1afed, 0x6a267e96, 0xba7c9045, 0xf12c7f99,
-                    0x24a19947, 0xb3916cf7, 0x0801f2e2, 0x858efc16, 0x636920d8, 0x71574e69, 0xa458fea3, 0xf4933d7e,
-                    0x0d95748f, 0x728eb658, 0x718bcd58, 0x82154aee, 0x7b54a41d, 0xc25a59b5, 0x9c30d539, 0x2af26013,
-                    0xc5d1b023, 0x286085f0, 0xca417918, 0xb8db38ef, 0x8e79dcb0, 0x603a180e, 0x6c9e0e8b, 0xb01e8a3e,
-                    0xd71577c1, 0xbd314b27, 0x78af2fda, 0x55605c60, 0xe65525f3, 0xaa55ab94, 0x57489862, 0x63e81440,
-                    0x55ca396a, 0x2aab10b6, 0xb4cc5c34, 0x1141e8ce, 0xa15486af, 0x7c72e993, 0xb3ee1411, 0x636fbc2a,
-                    0x2ba9c55d, 0x741831f6, 0xce5c3e16, 0x9b87931e, 0xafd6ba33, 0x6c24cf5c, 0x7a325381, 0x28958677,
-                    0x3b8f4898, 0x6b4bb9af, 0xc4bfe81b, 0x66282193, 0x61d809cc, 0xfb21a991, 0x487cac60, 0x5dec8032,
-                    0xef845d5d, 0xe98575b1, 0xdc262302, 0xeb651b88, 0x23893e81, 0xd396acc5, 0x0f6d6ff3, 0x83f44239,
-                    0x2e0b4482, 0xa4842004, 0x69c8f04a, 0x9e1f9b5e, 0x21c66842, 0xf6e96c9a, 0x670c9c61, 0xabd388f0,
-                    0x6a51a0d2, 0xd8542f68, 0x960fa728, 0xab5133a3, 0x6eef0b6c, 0x137a3be4, 0xba3bf050, 0x7efb2a98,
-                    0xa1f1651d, 0x39af0176, 0x66ca593e, 0x82430e88, 0x8cee8619, 0x456f9fb4, 0x7d84a5c3, 0x3b8b5ebe,
-                    0xe06f75d8, 0x85c12073, 0x401a449f, 0x56c16aa6, 0x4ed3aa62, 0x363f7706, 0x1bfedf72, 0x429b023d,
-                    0x37d0d724, 0xd00a1248, 0xdb0fead3, 0x49f1c09b, 0x075372c9, 0x80991b7b, 0x25d479d8, 0xf6e8def7,
-                    0xe3fe501a, 0xb6794c3b, 0x976ce0bd, 0x04c006ba, 0xc1a94fb6, 0x409f60c4, 0x5e5c9ec2, 0x196a2463,
-                    0x68fb6faf, 0x3e6c53b5, 0x1339b2eb, 0x3b52ec6f, 0x6dfc511f, 0x9b30952c, 0xcc814544, 0xaf5ebd09,
-                    0xbee3d004, 0xde334afd, 0x660f2807, 0x192e4bb3, 0xc0cba857, 0x45c8740f, 0xd20b5f39, 0xb9d3fbdb,
-                    0x5579c0bd, 0x1a60320a, 0xd6a100c6, 0x402c7279, 0x679f25fe, 0xfb1fa3cc, 0x8ea5e9f8, 0xdb3222f8,
-                    0x3c7516df, 0xfd616b15, 0x2f501ec8, 0xad0552ab, 0x323db5fa, 0xfd238760, 0x53317b48, 0x3e00df82,
-                    0x9e5c57bb, 0xca6f8ca0, 0x1a87562e, 0xdf1769db, 0xd542a8f6, 0x287effc3, 0xac6732c6, 0x8c4f5573,
-                    0x695b27b0, 0xbbca58c8, 0xe1ffa35d, 0xb8f011a0, 0x10fa3d98, 0xfd2183b8, 0x4afcb56c, 0x2dd1d35b,
-                    0x9a53e479, 0xb6f84565, 0xd28e49bc, 0x4bfb9790, 0xe1ddf2da, 0xa4cb7e33, 0x62fb1341, 0xcee4c6e8,
-                    0xef20cada, 0x36774c01, 0xd07e9efe, 0x2bf11fb4, 0x95dbda4d, 0xae909198, 0xeaad8e71, 0x6b93d5a0,
-                    0xd08ed1d0, 0xafc725e0, 0x8e3c5b2f, 0x8e7594b7, 0x8ff6e2fb, 0xf2122b64, 0x8888b812, 0x900df01c,
-                    0x4fad5ea0, 0x688fc31c, 0xd1cff191, 0xb3a8c1ad, 0x2f2f2218, 0xbe0e1777, 0xea752dfe, 0x8b021fa1,
-                    0xe5a0cc0f, 0xb56f74e8, 0x18acf3d6, 0xce89e299, 0xb4a84fe0, 0xfd13e0b7, 0x7cc43b81, 0xd2ada8d9,
-                    0x165fa266, 0x80957705, 0x93cc7314, 0x211a1477, 0xe6ad2065, 0x77b5fa86, 0xc75442f5, 0xfb9d35cf,
-                    0xebcdaf0c, 0x7b3e89a0, 0xd6411bd3, 0xae1e7e49, 0x00250e2d, 0x2071b35e, 0x226800bb, 0x57b8e0af,
-                    0x2464369b, 0xf009b91e, 0x5563911d, 0x59dfa6aa, 0x78c14389, 0xd95a537f, 0x207d5ba2, 0x02e5b9c5,
-                    0x83260376, 0x6295cfa9, 0x11c81968, 0x4e734a41, 0xb3472dca, 0x7b14a94a, 0x1b510052, 0x9a532915,
-                    0xd60f573f, 0xbc9bc6e4, 0x2b60a476, 0x81e67400, 0x08ba6fb5, 0x571be91f, 0xf296ec6b, 0x2a0dd915,
-                    0xb6636521, 0xe7b9f9b6, 0xff34052e, 0xc5855664, 0x53b02d5d, 0xa99f8fa1, 0x08ba4799, 0x6e85076a
-                ],
-                s1:[
-                    0x4b7a70e9, 0xb5b32944, 0xdb75092e, 0xc4192623, 0xad6ea6b0, 0x49a7df7d, 0x9cee60b8, 0x8fedb266,
-                    0xecaa8c71, 0x699a17ff, 0x5664526c, 0xc2b19ee1, 0x193602a5, 0x75094c29, 0xa0591340, 0xe4183a3e,
-                    0x3f54989a, 0x5b429d65, 0x6b8fe4d6, 0x99f73fd6, 0xa1d29c07, 0xefe830f5, 0x4d2d38e6, 0xf0255dc1,
-                    0x4cdd2086, 0x8470eb26, 0x6382e9c6, 0x021ecc5e, 0x09686b3f, 0x3ebaefc9, 0x3c971814, 0x6b6a70a1,
-                    0x687f3584, 0x52a0e286, 0xb79c5305, 0xaa500737, 0x3e07841c, 0x7fdeae5c, 0x8e7d44ec, 0x5716f2b8,
-                    0xb03ada37, 0xf0500c0d, 0xf01c1f04, 0x0200b3ff, 0xae0cf51a, 0x3cb574b2, 0x25837a58, 0xdc0921bd,
-                    0xd19113f9, 0x7ca92ff6, 0x94324773, 0x22f54701, 0x3ae5e581, 0x37c2dadc, 0xc8b57634, 0x9af3dda7,
-                    0xa9446146, 0x0fd0030e, 0xecc8c73e, 0xa4751e41, 0xe238cd99, 0x3bea0e2f, 0x3280bba1, 0x183eb331,
-                    0x4e548b38, 0x4f6db908, 0x6f420d03, 0xf60a04bf, 0x2cb81290, 0x24977c79, 0x5679b072, 0xbcaf89af,
-                    0xde9a771f, 0xd9930810, 0xb38bae12, 0xdccf3f2e, 0x5512721f, 0x2e6b7124, 0x501adde6, 0x9f84cd87,
-                    0x7a584718, 0x7408da17, 0xbc9f9abc, 0xe94b7d8c, 0xec7aec3a, 0xdb851dfa, 0x63094366, 0xc464c3d2,
-                    0xef1c1847, 0x3215d908, 0xdd433b37, 0x24c2ba16, 0x12a14d43, 0x2a65c451, 0x50940002, 0x133ae4dd,
-                    0x71dff89e, 0x10314e55, 0x81ac77d6, 0x5f11199b, 0x043556f1, 0xd7a3c76b, 0x3c11183b, 0x5924a509,
-                    0xf28fe6ed, 0x97f1fbfa, 0x9ebabf2c, 0x1e153c6e, 0x86e34570, 0xeae96fb1, 0x860e5e0a, 0x5a3e2ab3,
-                    0x771fe71c, 0x4e3d06fa, 0x2965dcb9, 0x99e71d0f, 0x803e89d6, 0x5266c825, 0x2e4cc978, 0x9c10b36a,
-                    0xc6150eba, 0x94e2ea78, 0xa5fc3c53, 0x1e0a2df4, 0xf2f74ea7, 0x361d2b3d, 0x1939260f, 0x19c27960,
-                    0x5223a708, 0xf71312b6, 0xebadfe6e, 0xeac31f66, 0xe3bc4595, 0xa67bc883, 0xb17f37d1, 0x018cff28,
-                    0xc332ddef, 0xbe6c5aa5, 0x65582185, 0x68ab9802, 0xeecea50f, 0xdb2f953b, 0x2aef7dad, 0x5b6e2f84,
-                    0x1521b628, 0x29076170, 0xecdd4775, 0x619f1510, 0x13cca830, 0xeb61bd96, 0x0334fe1e, 0xaa0363cf,
-                    0xb5735c90, 0x4c70a239, 0xd59e9e0b, 0xcbaade14, 0xeecc86bc, 0x60622ca7, 0x9cab5cab, 0xb2f3846e,
-                    0x648b1eaf, 0x19bdf0ca, 0xa02369b9, 0x655abb50, 0x40685a32, 0x3c2ab4b3, 0x319ee9d5, 0xc021b8f7,
-                    0x9b540b19, 0x875fa099, 0x95f7997e, 0x623d7da8, 0xf837889a, 0x97e32d77, 0x11ed935f, 0x16681281,
-                    0x0e358829, 0xc7e61fd6, 0x96dedfa1, 0x7858ba99, 0x57f584a5, 0x1b227263, 0x9b83c3ff, 0x1ac24696,
-                    0xcdb30aeb, 0x532e3054, 0x8fd948e4, 0x6dbc3128, 0x58ebf2ef, 0x34c6ffea, 0xfe28ed61, 0xee7c3c73,
-                    0x5d4a14d9, 0xe864b7e3, 0x42105d14, 0x203e13e0, 0x45eee2b6, 0xa3aaabea, 0xdb6c4f15, 0xfacb4fd0,
-                    0xc742f442, 0xef6abbb5, 0x654f3b1d, 0x41cd2105, 0xd81e799e, 0x86854dc7, 0xe44b476a, 0x3d816250,
-                    0xcf62a1f2, 0x5b8d2646, 0xfc8883a0, 0xc1c7b6a3, 0x7f1524c3, 0x69cb7492, 0x47848a0b, 0x5692b285,
-                    0x095bbf00, 0xad19489d, 0x1462b174, 0x23820e00, 0x58428d2a, 0x0c55f5ea, 0x1dadf43e, 0x233f7061,
-                    0x3372f092, 0x8d937e41, 0xd65fecf1, 0x6c223bdb, 0x7cde3759, 0xcbee7460, 0x4085f2a7, 0xce77326e,
-                    0xa6078084, 0x19f8509e, 0xe8efd855, 0x61d99735, 0xa969a7aa, 0xc50c06c2, 0x5a04abfc, 0x800bcadc,
-                    0x9e447a2e, 0xc3453484, 0xfdd56705, 0x0e1e9ec9, 0xdb73dbd3, 0x105588cd, 0x675fda79, 0xe3674340,
-                    0xc5c43465, 0x713e38d8, 0x3d28f89e, 0xf16dff20, 0x153e21e7, 0x8fb03d4a, 0xe6e39f2b, 0xdb83adf7
-                ],
-                s2:[
-                    0xe93d5a68, 0x948140f7, 0xf64c261c, 0x94692934, 0x411520f7, 0x7602d4f7, 0xbcf46b2e, 0xd4a20068,
-                    0xd4082471, 0x3320f46a, 0x43b7d4b7, 0x500061af, 0x1e39f62e, 0x97244546, 0x14214f74, 0xbf8b8840,
-                    0x4d95fc1d, 0x96b591af, 0x70f4ddd3, 0x66a02f45, 0xbfbc09ec, 0x03bd9785, 0x7fac6dd0, 0x31cb8504,
-                    0x96eb27b3, 0x55fd3941, 0xda2547e6, 0xabca0a9a, 0x28507825, 0x530429f4, 0x0a2c86da, 0xe9b66dfb,
-                    0x68dc1462, 0xd7486900, 0x680ec0a4, 0x27a18dee, 0x4f3ffea2, 0xe887ad8c, 0xb58ce006, 0x7af4d6b6,
-                    0xaace1e7c, 0xd3375fec, 0xce78a399, 0x406b2a42, 0x20fe9e35, 0xd9f385b9, 0xee39d7ab, 0x3b124e8b,
-                    0x1dc9faf7, 0x4b6d1856, 0x26a36631, 0xeae397b2, 0x3a6efa74, 0xdd5b4332, 0x6841e7f7, 0xca7820fb,
-                    0xfb0af54e, 0xd8feb397, 0x454056ac, 0xba489527, 0x55533a3a, 0x20838d87, 0xfe6ba9b7, 0xd096954b,
-                    0x55a867bc, 0xa1159a58, 0xcca92963, 0x99e1db33, 0xa62a4a56, 0x3f3125f9, 0x5ef47e1c, 0x9029317c,
-                    0xfdf8e802, 0x04272f70, 0x80bb155c, 0x05282ce3, 0x95c11548, 0xe4c66d22, 0x48c1133f, 0xc70f86dc,
-                    0x07f9c9ee, 0x41041f0f, 0x404779a4, 0x5d886e17, 0x325f51eb, 0xd59bc0d1, 0xf2bcc18f, 0x41113564,
-                    0x257b7834, 0x602a9c60, 0xdff8e8a3, 0x1f636c1b, 0x0e12b4c2, 0x02e1329e, 0xaf664fd1, 0xcad18115,
-                    0x6b2395e0, 0x333e92e1, 0x3b240b62, 0xeebeb922, 0x85b2a20e, 0xe6ba0d99, 0xde720c8c, 0x2da2f728,
-                    0xd0127845, 0x95b794fd, 0x647d0862, 0xe7ccf5f0, 0x5449a36f, 0x877d48fa, 0xc39dfd27, 0xf33e8d1e,
-                    0x0a476341, 0x992eff74, 0x3a6f6eab, 0xf4f8fd37, 0xa812dc60, 0xa1ebddf8, 0x991be14c, 0xdb6e6b0d,
-                    0xc67b5510, 0x6d672c37, 0x2765d43b, 0xdcd0e804, 0xf1290dc7, 0xcc00ffa3, 0xb5390f92, 0x690fed0b,
-                    0x667b9ffb, 0xcedb7d9c, 0xa091cf0b, 0xd9155ea3, 0xbb132f88, 0x515bad24, 0x7b9479bf, 0x763bd6eb,
-                    0x37392eb3, 0xcc115979, 0x8026e297, 0xf42e312d, 0x6842ada7, 0xc66a2b3b, 0x12754ccc, 0x782ef11c,
-                    0x6a124237, 0xb79251e7, 0x06a1bbe6, 0x4bfb6350, 0x1a6b1018, 0x11caedfa, 0x3d25bdd8, 0xe2e1c3c9,
-                    0x44421659, 0x0a121386, 0xd90cec6e, 0xd5abea2a, 0x64af674e, 0xda86a85f, 0xbebfe988, 0x64e4c3fe,
-                    0x9dbc8057, 0xf0f7c086, 0x60787bf8, 0x6003604d, 0xd1fd8346, 0xf6381fb0, 0x7745ae04, 0xd736fccc,
-                    0x83426b33, 0xf01eab71, 0xb0804187, 0x3c005e5f, 0x77a057be, 0xbde8ae24, 0x55464299, 0xbf582e61,
-                    0x4e58f48f, 0xf2ddfda2, 0xf474ef38, 0x8789bdc2, 0x5366f9c3, 0xc8b38e74, 0xb475f255, 0x46fcd9b9,
-                    0x7aeb2661, 0x8b1ddf84, 0x846a0e79, 0x915f95e2, 0x466e598e, 0x20b45770, 0x8cd55591, 0xc902de4c,
-                    0xb90bace1, 0xbb8205d0, 0x11a86248, 0x7574a99e, 0xb77f19b6, 0xe0a9dc09, 0x662d09a1, 0xc4324633,
-                    0xe85a1f02, 0x09f0be8c, 0x4a99a025, 0x1d6efe10, 0x1ab93d1d, 0x0ba5a4df, 0xa186f20f, 0x2868f169,
-                    0xdcb7da83, 0x573906fe, 0xa1e2ce9b, 0x4fcd7f52, 0x50115e01, 0xa70683fa, 0xa002b5c4, 0x0de6d027,
-                    0x9af88c27, 0x773f8641, 0xc3604c06, 0x61a806b5, 0xf0177a28, 0xc0f586e0, 0x006058aa, 0x30dc7d62,
-                    0x11e69ed7, 0x2338ea63, 0x53c2dd94, 0xc2c21634, 0xbbcbee56, 0x90bcb6de, 0xebfc7da1, 0xce591d76,
-                    0x6f05e409, 0x4b7c0188, 0x39720a3d, 0x7c927c24, 0x86e3725f, 0x724d9db9, 0x1ac15bb4, 0xd39eb8fc,
-                    0xed545578, 0x08fca5b5, 0xd83d7cd3, 0x4dad0fc4, 0x1e50ef5e, 0xb161e6f8, 0xa28514d9, 0x6c51133c,
-                    0x6fd5c7e7, 0x56e14ec4, 0x362abfce, 0xddc6c837, 0xd79a3234, 0x92638212, 0x670efa8e, 0x406000e0
-                ],
-                s3:[
-                    0x3a39ce37, 0xd3faf5cf, 0xabc27737, 0x5ac52d1b, 0x5cb0679e, 0x4fa33742, 0xd3822740, 0x99bc9bbe,
-                    0xd5118e9d, 0xbf0f7315, 0xd62d1c7e, 0xc700c47b, 0xb78c1b6b, 0x21a19045, 0xb26eb1be, 0x6a366eb4,
-                    0x5748ab2f, 0xbc946e79, 0xc6a376d2, 0x6549c2c8, 0x530ff8ee, 0x468dde7d, 0xd5730a1d, 0x4cd04dc6,
-                    0x2939bbdb, 0xa9ba4650, 0xac9526e8, 0xbe5ee304, 0xa1fad5f0, 0x6a2d519a, 0x63ef8ce2, 0x9a86ee22,
-                    0xc089c2b8, 0x43242ef6, 0xa51e03aa, 0x9cf2d0a4, 0x83c061ba, 0x9be96a4d, 0x8fe51550, 0xba645bd6,
-                    0x2826a2f9, 0xa73a3ae1, 0x4ba99586, 0xef5562e9, 0xc72fefd3, 0xf752f7da, 0x3f046f69, 0x77fa0a59,
-                    0x80e4a915, 0x87b08601, 0x9b09e6ad, 0x3b3ee593, 0xe990fd5a, 0x9e34d797, 0x2cf0b7d9, 0x022b8b51,
-                    0x96d5ac3a, 0x017da67d, 0xd1cf3ed6, 0x7c7d2d28, 0x1f9f25cf, 0xadf2b89b, 0x5ad6b472, 0x5a88f54c,
-                    0xe029ac71, 0xe019a5e6, 0x47b0acfd, 0xed93fa9b, 0xe8d3c48d, 0x283b57cc, 0xf8d56629, 0x79132e28,
-                    0x785f0191, 0xed756055, 0xf7960e44, 0xe3d35e8c, 0x15056dd4, 0x88f46dba, 0x03a16125, 0x0564f0bd,
-                    0xc3eb9e15, 0x3c9057a2, 0x97271aec, 0xa93a072a, 0x1b3f6d9b, 0x1e6321f5, 0xf59c66fb, 0x26dcf319,
-                    0x7533d928, 0xb155fdf5, 0x03563482, 0x8aba3cbb, 0x28517711, 0xc20ad9f8, 0xabcc5167, 0xccad925f,
-                    0x4de81751, 0x3830dc8e, 0x379d5862, 0x9320f991, 0xea7a90c2, 0xfb3e7bce, 0x5121ce64, 0x774fbe32,
-                    0xa8b6e37e, 0xc3293d46, 0x48de5369, 0x6413e680, 0xa2ae0810, 0xdd6db224, 0x69852dfd, 0x09072166,
-                    0xb39a460a, 0x6445c0dd, 0x586cdecf, 0x1c20c8ae, 0x5bbef7dd, 0x1b588d40, 0xccd2017f, 0x6bb4e3bb,
-                    0xdda26a7e, 0x3a59ff45, 0x3e350a44, 0xbcb4cdd5, 0x72eacea8, 0xfa6484bb, 0x8d6612ae, 0xbf3c6f47,
-                    0xd29be463, 0x542f5d9e, 0xaec2771b, 0xf64e6370, 0x740e0d8d, 0xe75b1357, 0xf8721671, 0xaf537d5d,
-                    0x4040cb08, 0x4eb4e2cc, 0x34d2466a, 0x0115af84, 0xe1b00428, 0x95983a1d, 0x06b89fb4, 0xce6ea048,
-                    0x6f3f3b82, 0x3520ab82, 0x011a1d4b, 0x277227f8, 0x611560b1, 0xe7933fdc, 0xbb3a792b, 0x344525bd,
-                    0xa08839e1, 0x51ce794b, 0x2f32c9b7, 0xa01fbac9, 0xe01cc87e, 0xbcc7d1f6, 0xcf0111c3, 0xa1e8aac7,
-                    0x1a908749, 0xd44fbd9a, 0xd0dadecb, 0xd50ada38, 0x0339c32a, 0xc6913667, 0x8df9317c, 0xe0b12b4f,
-                    0xf79e59b7, 0x43f5bb3a, 0xf2d519ff, 0x27d9459c, 0xbf97222c, 0x15e6fc2a, 0x0f91fc71, 0x9b941525,
-                    0xfae59361, 0xceb69ceb, 0xc2a86459, 0x12baa8d1, 0xb6c1075e, 0xe3056a0c, 0x10d25065, 0xcb03a442,
-                    0xe0ec6e0e, 0x1698db3b, 0x4c98a0be, 0x3278e964, 0x9f1f9532, 0xe0d392df, 0xd3a0342b, 0x8971f21e,
-                    0x1b0a7441, 0x4ba3348c, 0xc5be7120, 0xc37632d8, 0xdf359f8d, 0x9b992f2e, 0xe60b6f47, 0x0fe3f11d,
-                    0xe54cda54, 0x1edad891, 0xce6279cf, 0xcd3e7e6f, 0x1618b166, 0xfd2c1d05, 0x848fd2c5, 0xf6fb2299,
-                    0xf523f357, 0xa6327623, 0x93a83531, 0x56cccd02, 0xacf08162, 0x5a75ebb5, 0x6e163697, 0x88d273cc,
-                    0xde966292, 0x81b949d0, 0x4c50901b, 0x71c65614, 0xe6c6c7bd, 0x327a140a, 0x45e1d006, 0xc3f27b9a,
-                    0xc9aa53fd, 0x62a80f00, 0xbb25bfe2, 0x35bdd2f6, 0x71126905, 0xb2040222, 0xb6cbcf7c, 0xcd769c2b,
-                    0x53113ec0, 0x1640e3d3, 0x38abbd60, 0x2547adf0, 0xba38209c, 0xf746ce76, 0x77afa1c5, 0x20756060,
-                    0x85cbfe4e, 0x8ae88dd8, 0x7aaaf9b0, 0x4cf9aa7e, 0x1948c25c, 0x02fb8a8c, 0x01c36ae4, 0xd6ebe1f9,
-                    0x90d4f869, 0xa65cdea0, 0x3f09252d, 0xc208e69f, 0xb74e6132, 0xce77e25b, 0x578fdfe3, 0x3ac372e6
-                ]
-            }
-
-            function add(x,y){
-                return (((x>>0x10)+(y>>0x10)+(((x&0xffff)+(y&0xffff))>>0x10))<<0x10)|(((x&0xffff)+(y&0xffff))&0xffff);
-            }
-
-            function xor(x,y){
-                return (((x>>0x10)^(y>>0x10))<<0x10)|(((x&0xffff)^(y&0xffff))&0xffff);
-            }
-
-            function $(v, box){
-                var d=box.s3[v&0xff]; v>>=8;
-                var c=box.s2[v&0xff]; v>>=8;
-                var b=box.s1[v&0xff]; v>>=8;
-                var a=box.s0[v&0xff];
-
-                var r = (((a>>0x10)+(b>>0x10)+(((a&0xffff)+(b&0xffff))>>0x10))<<0x10)|(((a&0xffff)+(b&0xffff))&0xffff);
-                r = (((r>>0x10)^(c>>0x10))<<0x10)|(((r&0xffff)^(c&0xffff))&0xffff);
-                return (((r>>0x10)+(d>>0x10)+(((r&0xffff)+(d&0xffff))>>0x10))<<0x10)|(((r&0xffff)+(d&0xffff))&0xffff);
-            }
-
-            function eb(o, box){
-                var l=o.left;
-                var r=o.right;
-                l=xor(l,box.p[0]);
-                r=xor(r,xor($(l,box),box.p[1]));
-                l=xor(l,xor($(r,box),box.p[2]));
-                r=xor(r,xor($(l,box),box.p[3]));
-                l=xor(l,xor($(r,box),box.p[4]));
-                r=xor(r,xor($(l,box),box.p[5]));
-                l=xor(l,xor($(r,box),box.p[6]));
-                r=xor(r,xor($(l,box),box.p[7]));
-                l=xor(l,xor($(r,box),box.p[8]));
-                r=xor(r,xor($(l,box),box.p[9]));
-                l=xor(l,xor($(r,box),box.p[10]));
-                r=xor(r,xor($(l,box),box.p[11]));
-                l=xor(l,xor($(r,box),box.p[12]));
-                r=xor(r,xor($(l,box),box.p[13]));
-                l=xor(l,xor($(r,box),box.p[14]));
-                r=xor(r,xor($(l,box),box.p[15]));
-                l=xor(l,xor($(r,box),box.p[16]));
-                o.right=l;
-                o.left=xor(r,box.p[17]);
-            }
-
-            function db(o, box){
-                var l=o.left;
-                var r=o.right;
-                l=xor(l,box.p[17]);
-                r=xor(r,xor($(l,box),box.p[16]));
-                l=xor(l,xor($(r,box),box.p[15]));
-                r=xor(r,xor($(l,box),box.p[14]));
-                l=xor(l,xor($(r,box),box.p[13]));
-                r=xor(r,xor($(l,box),box.p[12]));
-                l=xor(l,xor($(r,box),box.p[11]));
-                r=xor(r,xor($(l,box),box.p[10]));
-                l=xor(l,xor($(r,box),box.p[9]));
-                r=xor(r,xor($(l,box),box.p[8]));
-                l=xor(l,xor($(r,box),box.p[7]));
-                r=xor(r,xor($(l,box),box.p[6]));
-                l=xor(l,xor($(r,box),box.p[5]));
-                r=xor(r,xor($(l,box),box.p[4]));
-                l=xor(l,xor($(r,box),box.p[3]));
-                r=xor(r,xor($(l,box),box.p[2]));
-                l=xor(l,xor($(r,box),box.p[1]));
-                o.right=l;
-                o.left=xor(r,box.p[0]);
-            }
-
-            function init(key){
-                var k=key, pos=0, data=0, res={ left:0, right:0 }, i, j, l;
-                var box = {
-                    p: arrayMapWithHoles(boxes.p.slice(0), function(item){
-                        var l=k.length, j;
-                        for(j=0; j<4; j++){ data=(data*POW8)|k[pos++ % l]; }
-                        return (((item>>0x10)^(data>>0x10))<<0x10)|(((item&0xffff)^(data&0xffff))&0xffff);
-                    }),
-                    s0:boxes.s0.slice(0),
-                    s1:boxes.s1.slice(0),
-                    s2:boxes.s2.slice(0),
-                    s3:boxes.s3.slice(0)
-                };
-                for(i=0, l=box.p.length; i<l;){
-                    eb(res, box);
-                    box.p[i++]=res.left, box.p[i++]=res.right;
-                }
-                for(i=0; i<4; i++){
-                    for(j=0, l=box["s"+i].length; j<l;){
-                        eb(res, box);
-                        box["s"+i][j++]=res.left, box["s"+i][j++]=res.right;
-                    }
-                }
-                return box;
-            }
-
-            this.hexStringToByteArray=function(hexString) {
-                if (hexString.length % 2 == 1) {
-                    hexString += "0";
-                }
-                for (var bytes = [], index = 0; index < hexString.length; index += 2) {
-                    bytes.push(parseInt(hexString.substring(index, index+2), 16));
-                }
-                return bytes;
-            }
-
-            this.getIV=function(){
-                return base64.encode(iv);
-            };
-
-            this.setIV=function(data){
-                var ba=base64.decode(data);
-                iv={};
-                iv.left=ba[0]*POW24|ba[1]*POW16|ba[2]*POW8|ba[3];
-                iv.right=ba[4]*POW24|ba[5]*POW16|ba[6]*POW8|ba[7];
-            };
-
-            this.encryptString = function(plaintext, key){
-                var bx = init(this.hexStringToByteArray(key)), padding = 8-(plaintext.length&7);
-                for (var i=0; i<padding; i++){ plaintext+=String.fromCharCode(padding); }
-                var cipher=[], count=plaintext.length >> 3, pos=0, o={};
-                for(var i=0; i<count; i++){
-                    o.left=plaintext.charCodeAt(pos)*POW24
-                        |plaintext.charCodeAt(pos+1)*POW16
-                        |plaintext.charCodeAt(pos+2)*POW8
-                        |plaintext.charCodeAt(pos+3);
-                    o.right=plaintext.charCodeAt(pos+4)*POW24
-                        |plaintext.charCodeAt(pos+5)*POW16
-                        |plaintext.charCodeAt(pos+6)*POW8
-                        |plaintext.charCodeAt(pos+7);
-                    eb(o, bx);
-                    cipher.push((o.left>>24)&0xff);
-                    cipher.push((o.left>>16)&0xff);
-                    cipher.push((o.left>>8)&0xff);
-                    cipher.push(o.left&0xff);
-                    cipher.push((o.right>>24)&0xff);
-                    cipher.push((o.right>>16)&0xff);
-                    cipher.push((o.right>>8)&0xff);
-                    cipher.push(o.right&0xff);
-                    pos+=8;
-                }
-                return stringTranslate(base64.encode(cipher), ["+", "/", "="], ["-", "_", "~"]);
-            };
-
-            this.decryptString = function(ciphertext, key){
-                var bx = init(this.hexStringToByteArray(key));
-                var pt=[];
-                var c=base64.decode(stringTranslate(ciphertext, ["-", "_", "~"], ["+", "/", "="]));
-                var count=c.length >> 3, pos=0, o={};
-                for(var i=0; i<count; i++){
-                    o.left=c[pos]*POW24|c[pos+1]*POW16|c[pos+2]*POW8|c[pos+3];
-                    o.right=c[pos+4]*POW24|c[pos+5]*POW16|c[pos+6]*POW8|c[pos+7];
-                    db(o, bx);
-                    pt.push((o.left>>24)&0xff);
-                    pt.push((o.left>>16)&0xff);
-                    pt.push((o.left>>8)&0xff);
-                    pt.push(o.left&0xff);
-                    pt.push((o.right>>24)&0xff);
-                    pt.push((o.right>>16)&0xff);
-                    pt.push((o.right>>8)&0xff);
-                    pt.push(o.right&0xff);
-                    pos+=8;
-                }
-                if(pt[pt.length-1]==pt[pt.length-2]||pt[pt.length-1]==0x01){
-                    var n=pt[pt.length-1];
-                    pt.splice(pt.length-n, n);
-                }
-                return arrayMapWithHoles(pt, function(item){
-                    return String.fromCharCode(item);
-                }).join("");
-            };
-            this.setIV("0000000000000000");
-        }();
-        return crypto.blowfish;
-    })();
-
-    /**
-     * Verify the hash provided in the response is valid with the data provided. This is an
-     * attempt to verify the payload was not tampered with to spoof the session. In order for
-     * this to work we expect `enginesis.loggedInUserInfo` was restored from a prior session,
-     * either a current session UserLogin, a SessionRefresh, or localStorage/Cookie.
-     *
-     * @param {object} sessionInfo A session object sent by the Enginesis server.
-     * @return {boolean} True if we think the session from the server matches the data we have locally.
-     */
-    function sessionVerifyGameHash(sessionInfo) {
-        var isValid = false;
-        var cr = sessionInfo.cr || "";
-        var hash = "";
-        var userInfo = enginesis.loggedInUserInfo;
-        if (cr) {
-            hash = sessionMakeGameHash({
-                siteId: enginesis.siteId,
-                gameId: enginesis.gameId,
-                userId: coerceNotNull(userInfo.user_id, 0),
-                userName: coerceNotEmpty(userInfo.user_name, ""),
-                siteUserId: coerceNotEmpty(userInfo.site_user_id, ""),
-                networkId: coerceNotNull(userInfo.network_id, 1),
-                accessLevel: coerceNotNull(userInfo.access_level, 0),
-                siteKey: enginesis.developerKey
-            });
-            isValid = cr == hash;
-            if ( ! isValid) {
-                // if not valid, it could be because the users authentication expired
-                userInfo.dayStamp = sessionDayStamp();
-                hash = sessionMakeGameHash({
-                    siteId: enginesis.siteId,
-                    gameId: enginesis.gameId,
-                    userId: 0,
-                    userName: "",
-                    siteUserId: "",
-                    networkId: 1,
-                    accessLevel: 10,
-                    siteKey: enginesis.developerKey
-                });
-                isValid = cr == hash;
-                if (isValid) {
-                    // game session is good but the user must refresh their authentication
-                    debugLog("sessionVerifyGameHash Session expired but we think we can refresh it.");
-                    enginesisContext.sessionRefresh(_getRefreshToken(), null)
-                    .then(function(enginesisResult) {
-                        debugLog("sessionVerifyGameHash users authentication has been refreshed. " + enginesisResult.toString());
-                    }, function(enginesisError) {
-                        debugLog("sessionVerifyGameHash refresh error " + enginesisError.toString());
-                    })
-                    .catch(function(exception) {
-                        debugLog("sessionVerifyGameHash refresh exception " + exception.toString());
-                    });
-                }
-            }
-        }
-        if ( ! isValid) {
-            debugLog("sessionVerifyGameHash hash does not match. From server: " + cr + ". Computed here: " + hash);
-        }
-        return true;
-    }
-
-    /**
      * This is the callback from a request to refresh the Enginesis login when the auth token
      * expires. This response is similar to the initial login response. Called from `sessionRefresh`.
      * @param {object} enginesisResult Enginesis result object.
      * @returns {boolean} True if successful.
      */
     function refreshSessionInfo(enginesisResult) {
-        var refreshSuccessful = false;
+        let refreshSuccessful = false;
         if (enginesisResult && enginesisResult.results && enginesisResult.results.result) {
-            var sessionInfo = enginesisResult.results.result[0];
-
-            debugLog(">>>>> enginesis.refreshSessionInfo new session id " + sessionInfo.session_id + " new CR " + sessionInfo.cr);
+            const sessionInfo = enginesisResult.results.result[0];
 
             // verify session hash so that we know the payload was not tampered with
             if ( ! sessionVerifyHash(sessionInfo.cr, sessionInfo)) {
                 debugLog("refreshSessionInfo hash does not match. From server: " + sessionInfo.cr + ". Computed here: " + sessionMakeHash());
-                refreshSuccessful = false;
             }
             refreshSuccessful = saveUserSessionInfo(sessionInfo, false);
         } else {
-            var errorCode = resultErrorCode(enginesisResult);
+            const errorCode = resultErrorCode(enginesisResult);
             if (errorCode == "INVALID_PARAMETER" || errorCode == "INVALID_TOKEN") {
                 // if the refresh token is invalid then log this user out or else
                 // we will keep trying this bad token on every request.
@@ -1049,20 +620,28 @@
     }
 
     /**
+     * Determine a new session expiration time. Return the date in MySQL date format
+     * "yyyy-mm-dd hh:mm:ss", this time should also be in UTC without time zone.
+     * @returns {string} A new session expire time.
+     */
+    function newSessionExpireTime() {
+        return new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ');
+    }
+
+    /**
      * Capture the session begin session id so we can use it for communicating with the server.
      * We end up here after a call to `sessionBegin` and this is the server response.
      * @param {object} enginesisResult Enginesis server response object
      */
     function updateGameSessionInfo(enginesisResult) {
-        // @todo: check if token expired then call sessionrefresh
-        var sessionInfo = enginesisResult.results.result[0];
-        if (sessionVerifyGameHash(sessionInfo)) {
+        const sessionInfo = enginesisResult.results.result[0];
+        if (sessionVerifyHash(sessionInfo.cr, null)) {
             updateGameInfo(enginesisResult);
             if (sessionInfo.authToken || sessionInfo.authtok) {
                 saveUserSessionInfo(sessionInfo, true);
             } else {
                 enginesis.sessionId = sessionInfo.session_id;
-                enginesis.sessionExpires = Date.now() + (24 * 60 * 60 * 1000); // have it expire in 1 day.
+                enginesis.sessionExpires = newSessionExpireTime();
                 if (sessionInfo.site_mark && sessionInfo.site_mark != enginesis.anonymousUser.userId) {
                     enginesis.anonymousUser.userId = sessionInfo.site_mark;
                     anonymousUserSave();
@@ -1108,9 +687,9 @@
      * @returns {boolean} True if save is successful, false if error.
      */
     function updateLoggedInUserInfo(enginesisResult) {
-        var updated = false;
+        let updated = false;
         if (enginesisResult && enginesisResult.results && enginesisResult.results.result) {
-            var userInfo = enginesisResult.results.result[0];
+            const userInfo = enginesisResult.results.result[0];
 
             // verify session hash so that we know the payload was not tampered with
             if ( ! sessionVerifyHash(userInfo.cr, userInfo)) {
@@ -1121,6 +700,7 @@
 
             // Move server authorized user data into the local cache
             enginesis.loggedInUserInfo = userInfo;
+            enginesis.isUserLoggedIn = Math.floor(userInfo.user_id) > 0;
             enginesis.networkId = userInfo.network_id;
             updated = saveUserSessionInfo(userInfo, false);
         }
@@ -1149,60 +729,51 @@
     }
 
     /**
+     * Collect the user session information to make sure we represent the correct
+     * user log in and session state.
+     * @param {Object} userInfo A userInfo object received from a log in, session begin, or restored from local storage.
+     * @returns {Object} A userInfo object.
+     */
+    function coerceUserInfoFromUserInfo(userUserInfo) {
+        const loggedInUserInfo = enginesis.loggedInUserInfo || {};
+        const userInfo = userUserInfo || {};
+        let coercedUserInfo = {
+            siteId: enginesis.siteId,
+            userId: coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0),
+            userName: coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, ""),
+            accessLevel: coerceNotNull(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10),
+            siteUserId: coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, ""),
+            networkId: coerceNotNull(userInfo.networkId, userInfo.network_id, loggedInUserInfo.network_id, 1),
+            gameId: userInfo.gameId || enginesis.gameId,
+            dayStamp: userInfo.dayStamp || sessionDayStamp(),
+            siteMark: 0
+        };
+        if (coercedUserInfo.userId == 0) {
+            // Use the site mark only if we do not have a user id
+            if (isNull(userInfo.siteMark)) {
+                if (enginesis.anonymousUser) {
+                    coercedUserInfo.siteMark = enginesis.anonymousUser.userId;
+                }
+            } else {
+                coercedUserInfo.siteMark = userInfo.siteMark;
+            }
+        }
+        return coercedUserInfo;
+    }
+
+    /**
      * Compute the session hash for the provided session information. If something is missing we will get
      * a default value from the current session, regardless if it is valid or not. It's not really valid
      * calling this function this way if authTokenWasValidated == false. This function matches server-side
      * sessionMakeHash().
      *
-     * @param {object} userInfo an object containing the key/value pairs identifying a user session, all of which are optional:
-     *    siteId, siteKey, dayStamp, userId, userName, siteUserId, accessLevel
+     * @param {object} sessionUserInfo an object containing the key/value pairs identifying a user session, all of which are optional:
+     *    siteId, userId, userName, siteUserId, networkId, accessLevel, gameId, dayStamp.
      * @returns {string} The hash for the current user session.
      */
-    function sessionMakeHash(userInfo) {
-        userInfo = userInfo || {};
-        const loggedInUserInfo = enginesis.loggedInUserInfo || {};
-        const siteId = enginesis.siteId;
-        const userId = coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
-        const userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
-        const accessLevel = coerceNotNull(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
-        const siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
-        const networkId = coerceNotNull(userInfo.networkId, userInfo.network_id, loggedInUserInfo.network_id, 1);
-        const dayStamp = userInfo.dayStamp || sessionDayStamp();
-        return md5(`s=${siteId}&u=${userId}&d=${dayStamp}&n=${userName}&i=${siteUserId}&w=${networkId}&l=${accessLevel}&k=${enginesis.developerKey}`);
-    }
-
-    /**
-     * Compute the game session hash for the provided session information. If something is missing we will get
-     * a default value from the current session, regardless if it is valid or not. It's not really valid
-     * calling this function this way if authTokenWasValidated == false. This function matches server-side
-     * sessionMakeGameHash().
-     *
-     * @param {object} userInfo an object containing the key/value pairs identifying a user session, all of which are optional:
-     *    siteId, siteKey, dayStamp, userId, userName, siteUserId, accessLevel
-     * @returns {string} The hash for the current game session.
-     */
-    function sessionMakeGameHash(userInfo) {
-        userInfo = userInfo || {};
-        const loggedInUserInfo = enginesis.loggedInUserInfo || {};
-        const siteId = enginesis.siteId;
-        const userId = coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0);
-        const userName = coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, "");
-        const accessLevel = coerceNotNull(userInfo.accessLevel, userInfo.access_level, loggedInUserInfo.access_level, 10);
-        const siteUserId = coerceNotEmpty(userInfo.siteUserId, userInfo.site_user_id, loggedInUserInfo.site_user_id, "");
-        const networkId = coerceNotNull(userInfo.networkId, userInfo.network_id, loggedInUserInfo.network_id, 1);
-        const gameId = userInfo.gameId || enginesis.gameId;
-        const dayStamp = userInfo.dayStamp || sessionDayStamp();
-        let siteMark = 0;
-
-        if (userId == 0) {
-            // Use the site mark only if we do not have a user id
-            if (isNull(userInfo.siteMark)) {
-                if (enginesis.anonymousUser) {
-                    siteMark = enginesis.anonymousUser.userId;
-                }
-            }
-        }
-        return md5(`s=${siteId}&u=${userId}&d=${dayStamp}&n=${userName}&g=${gameId}&i=${siteUserId}&w=${networkId}&l=${accessLevel}&m=${siteMark}&k=${enginesis.developerKey}`);
+    function sessionMakeHash(sessionUserInfo) {
+        const userInfo = coerceUserInfoFromUserInfo(sessionUserInfo);
+        return md5(`s=${userInfo.siteId}&u=${userInfo.userId}&d=${userInfo.dayStamp}&n=${userInfo.userName}&g=${userInfo.gameId}&i=${userInfo.siteUserId}&w=${userInfo.networkId}&l=${userInfo.accessLevel}&m=${userInfo.siteMark}&k=${enginesis.developerKey}`);
     }
 
     /**
@@ -1215,10 +786,33 @@
      *
      * @param {string} hashFromServer This is the hash computed on the server, usually returned in SessionBegin.
      * @param {object|null} userInfo The user information object to validate. If null will validate against prior log in user information.
-     * @returns {boolean} true if match, otherwise false.
+     * @return {boolean} True if we think the session from the server matches the data we have locally.
      */
     function sessionVerifyHash(hashFromServer, userInfo) {
-        return hashFromServer == sessionMakeHash(userInfo);
+        const userInfoInternal = coerceUserInfoFromUserInfo(userInfo);
+        let isVerified = hashFromServer == sessionMakeHash(userInfoInternal);
+        if ( ! isVerified) {
+            // if not valid, it could be because the users authentication expired, change the timestamp to today and try again.
+            userInfoInternal.dayStamp = sessionDayStamp();
+            isVerified = hashFromServer == sessionMakeHash(userInfoInternal);
+            if (isVerified) {
+                // game session is good but the user must refresh their authentication
+                debugLog("sessionVerifyHash Session expired but we think we can refresh it.");
+                enginesisContext.sessionRefresh(_getRefreshToken(), null)
+                .then(function(enginesisResult) {
+                    debugLog("sessionVerifyHash users authentication has been refreshed. " + enginesisResult.toString());
+                }, function(enginesisError) {
+                    debugLog("sessionVerifyHash refresh error " + enginesisError.toString());
+                })
+                .catch(function(exception) {
+                    debugLog("sessionVerifyHash refresh exception " + exception.toString());
+                });
+            }
+        }
+        if ( ! isVerified) {
+            debugLog("sessionVerifyHash hash does not match. From server: " + hashFromServer + ". Computed here: " + sessionMakeHash(userInfoInternal) + " from " + JSON.stringify(userInfoInternal));
+        }
+        return isVerified;
     }
 
     /**
@@ -1359,7 +953,7 @@
             body: new URLSearchParams(enginesisParameters)
         }).then(async function(response) {
             if (response.status != 200) {
-                let errorMessage = "Service error " + response.status + " from " + enginesis.siteResources.serviceURL + ": " + requestError.toString();
+                let errorMessage = "Service error " + response.status + " from " + enginesis.siteResources.serviceURL;
                 // @todo: we still need to determine if this is a server error or a network error
                 // if (setOffline()) {
                 //     errorMessage = "Enginesis network error encountered, assuming we're offline. " + enginesis.siteResources.serviceURL + " for " + serviceName + ": " + requestError.toString();
@@ -1903,7 +1497,7 @@
         if (queryString[0] == "?") {
             queryString = queryString.substring(1);
         }
-        while (match = search.exec(queryString)) {
+        while ((match = search.exec(queryString)) != null) {
             result[decode(match[1])] = decode(match[2]);
         }
         return result;
@@ -1988,7 +1582,7 @@
         }
         window.document.cookie = encodeURIComponent(key) + "=" + cookieData;
         return true;
-    };
+    }
 
     /**
      * Get info about the current logged in user, if there is one, from authtok parameter or cookie.
@@ -2001,9 +1595,8 @@
      * @returns {boolean} true if a user is restored this way, false if not.
      */
     function restoreUserFromAuthToken (authToken) {
-        var queryParameters;
-        var wasRestored = false;
-        var loggedInUserInfo = null;
+        let wasRestored = false;
+        let loggedInUserInfo = null;
 
         if (isEmpty(authToken)) {
             // if a token was not provided, try to find it in a cache in the following order:
@@ -2012,43 +1605,37 @@
             // 3. in local storage from prior session
             authToken = cookieGet(enginesis.SESSION_COOKIE);
             if (isEmpty(authToken)) {
-                queryParameters = queryStringToObject();
+                const queryParameters = queryStringToObject();
                 if (queryParameters.authtok !== undefined) {
                     authToken = queryParameters.authtok;
-                    debugLog("restoreUserFromAuthToken from query: " + authToken);
                 }
                 if (isEmpty(authToken)) {
                     loggedInUserInfo = loadObjectWithKey(enginesis.SESSION_USERINFO);
                     if (loggedInUserInfo != null && loggedInUserInfo.authToken) {
                         authToken = loggedInUserInfo.authToken;
-                        debugLog("restoreUserFromAuthToken from prior session: " + authToken);
                     }
                 }
             }
-        } else {
-            debugLog("restoreUserFromAuthToken from parameter: " + authToken);
         }
         if ( ! isEmpty(authToken)) {
             // @todo: Validate the token (for now we are accepting that it is valid but we should check!) If the authToken is valid then we can trust the userInfo
             // @todo: we can use cr to validate the token was not changed
             if (loggedInUserInfo == null) {
                 loggedInUserInfo = JSON.parse(cookieGet(enginesis.SESSION_USERINFO));
-                debugLog("restoreUserFromAuthToken user info from session cookie: " + loggedInUserInfo);
                 if (loggedInUserInfo == null) {
                     loggedInUserInfo = loadObjectWithKey(enginesis.SESSION_USERINFO);
-                    debugLog("restoreUserFromAuthToken user info from local storage: " + loggedInUserInfo);
                 }
             }
             if (loggedInUserInfo != null) {
                 enginesis.authToken = authToken;
                 enginesis.authTokenExpires = null; // @todo: Need to get the expiry of this token.
                 enginesis.authTokenWasValidated = true; // @todo: we should verify this payload is valid.
+                enginesis.isUserLoggedIn = Math.floor(loggedInUserInfo.user_id) > 0;
                 enginesis.loggedInUserInfo = loggedInUserInfo;
                 enginesis.networkId = Math.floor(loggedInUserInfo.network_id);
                 wasRestored = true;
-                debugLog("restoreUserFromAuthToken valid user: " + enginesis.loggedInUserInfo.user_name + "(" + enginesis.loggedInUserInfo.user_id + ")");
             } else {
-                // if we have an authtoken but we did not cache the user info, then
+                // if we have an auth token but we did not cache the user info, then
                 // if we trust that token, we need to log this user in
                 debugLog("restoreUserFromAuthToken valid token but no cached user " + authToken);
             }
@@ -2073,42 +1660,30 @@
      * @param {Object|null} sessionInfo the parameters that define the user session, otherwise saves
      *   what is already set on the current session.
      *   sessionInfo.expires is a UTC date when this info should expire.
-     * @param {boolean} fromGameSession True if sessionInfo was derived from a game session (SessionBegin), false if it is from a user session (UserLogin)
      * @returns {boolean} true if the save was successful, otherwise false.
      */
-    function saveUserSessionInfo(sessionInfo, fromGameSession) {
-        var haveValidSession;
+    function saveUserSessionInfo(sessionInfo) {
+        let haveValidSession;
         if (sessionInfo) {
-            if (fromGameSession) {
-                haveValidSession = sessionVerifyGameHash(sessionInfo);
-            } else {
-                haveValidSession = sessionVerifyHash(sessionInfo.cr, enginesis.loggedInUserInfo);
-            }
+            haveValidSession = sessionVerifyHash(sessionInfo.cr, null);
             if ( ! haveValidSession) {
-                var hash;
-                if (fromGameSession) {
-                    hash = sessionMakeGameHash(enginesis.loggedInUserInfo);
-                } else {
-                    hash = sessionMakeHash(enginesis.loggedInUserInfo);
-                }
+                const hash = sessionMakeHash(enginesis.loggedInUserInfo);
                 debugLog("Possible payload compromise: provided hash " + sessionInfo.cr + " does not match computer here " + hash);
                 // @todo: What action to take if hash does not agree?
-                haveValidSession = false;
             }
             haveValidSession = true;
             enginesis.sessionId = sessionInfo.session_id;
-            enginesis.sessionExpires = Date.now() + (24 * 60 * 60 * 1000); // have it expire in 1 day.
+            enginesis.sessionExpires = newSessionExpireTime();
             enginesis.authToken = sessionInfo.authToken || sessionInfo.authtok;
-            // enginesis.authTokenExpires = new Date(sessionInfo.expires);
+            enginesis.authTokenExpires = enginesis.sessionExpires;
             enginesis.loggedInUserInfo.authToken = enginesis.authToken;
             enginesis.loggedInUserInfo.authTokenExpires = sessionInfo.expires;
             enginesis.authTokenWasValidated = true;
             if (sessionInfo.refresh_token) {
                 enginesis.refreshToken = sessionInfo.refresh_token;
-                enginesis.refreshTokenExpires = new Date(sessionInfo.expires);
+                enginesis.refreshTokenExpires = sessionInfo.expires;
             }
             saveObjectWithKey(enginesis.SESSION_USERINFO, enginesis.loggedInUserInfo);
-            debugLog("enginesis.saveUserSessionInfo session id is " + enginesis.sessionId + " session.cr= " + sessionInfo.cr);
         } else {
             haveValidSession = false;
         }
@@ -2137,9 +1712,7 @@
      * @returns {boolean} true if the save was successful, otherwise false.
      */
     function restoreUserSessionInfo() {
-        var hash;
-        var success = false;
-        var userInfoSaved = loadObjectWithKey(enginesis.SESSION_USERINFO);
+        let userInfoSaved = loadObjectWithKey(enginesis.SESSION_USERINFO);
         if (userInfoSaved == null) {
             userInfoSaved = cookieGet(enginesis.SESSION_USERINFO);
             if (userInfoSaved != null) {
@@ -2152,7 +1725,7 @@
             }
         }
         if (userInfoSaved != null) {
-            hash = sessionMakeHash({
+            const hash = sessionMakeHash({
                 siteId: enginesis.siteId,
                 userId: userInfoSaved.userId,
                 userName: userInfoSaved.userName,
@@ -2172,20 +1745,19 @@
             }
             enginesis.networkId = userInfoSaved.network_id;
             enginesis.sessionId = userInfoSaved.session_id;
-            enginesis.sessionExpires = new Date(userInfoSaved.session_expires);
+            enginesis.sessionExpires = userInfoSaved.session_expires;
             enginesis.authToken = userInfoSaved.authToken;
-            enginesis.authTokenExpires = new Date(userInfoSaved.session_expires);
+            enginesis.authTokenExpires = userInfoSaved.session_expires;
             enginesis.authTokenWasValidated = true; // @todo: We should actually validate it (check expired, check hash, verify user_id matches)
             enginesis.refreshToken = userInfoSaved.refresh_token;
-            enginesis.refreshTokenExpires = new Date(userInfoSaved.expires);
+            enginesis.refreshTokenExpires = userInfoSaved.expires;
             enginesis.isUserLoggedIn = isUserLoggedIn();
-            debugLog("enginesis.restoreUserSessionInfo " + enginesis.sessionId + " from " + JSON.stringify(userInfoSaved));
         } else if (enginesis.isUserLoggedIn) {
             // if a user was not cached and we trust the authtok then we need to load this user
             enginesis.isUserLoggedIn = isUserLoggedIn();
             debugLog("enginesis.restoreUserSessionInfo we think the user is logged in but wasn't cached");
         }
-        return success;
+        return enginesis.isUserLoggedIn;
     }
 
     /**
@@ -2202,15 +1774,10 @@
      */
     function verifyUserSessionInfo() {
         return new Promise(function(resolve, reject) {
-            var hash;
-            var errorMessage;
-            var sessionExpireTime;
-            var sessionExpired;
-            var timeZoneOffset;
-            var isRefreshed = false;
-            var hashMatched = false;
-            var loggedInUserInfo = enginesis.loggedInUserInfo;
-            var userInfoSaved = loadObjectWithKey(enginesis.SESSION_COOKIE);
+            const loggedInUserInfo = enginesis.loggedInUserInfo;
+            const userInfoSaved = loadObjectWithKey(enginesis.SESSION_COOKIE);
+            let sessionExpireTime;
+            let isRefreshed = false;
             if (userInfoSaved != null) {
                 if ( ! userInfoSaved.sessionExpires) {
                     // if we don't get a session expire date then just assume it expired.
@@ -2218,9 +1785,9 @@
                 } else {
                     sessionExpireTime = new Date(userInfoSaved.sessionExpires);
                 }
-                timeZoneOffset = sessionExpireTime.getTimezoneOffset() * 60000;
-                sessionExpired = Date.now().valueOf() > (sessionExpireTime.valueOf() - timeZoneOffset);
-                hash = sessionMakeHash({
+                const timeZoneOffset = sessionExpireTime.getTimezoneOffset() * 60000;
+                const sessionExpired = Date.now().valueOf() > (sessionExpireTime.valueOf() - timeZoneOffset);
+                const hash = sessionMakeHash({
                     siteId: enginesis.siteId,
                     userId: loggedInUserInfo.user_id,
                     userName: loggedInUserInfo.user_name,
@@ -2229,7 +1796,7 @@
                     accessLevel: loggedInUserInfo.access_level,
                     siteKey: enginesis.developerKey
                 });
-                hashMatched = (hash == userInfoSaved.cr) && (Math.floor(loggedInUserInfo.user_id) == Math.floor(userInfoSaved.user_id));
+                const hashMatched = (hash == userInfoSaved.cr) && (Math.floor(loggedInUserInfo.user_id) == Math.floor(userInfoSaved.user_id));
                 if ( ! sessionExpired && hashMatched) {
                     isRefreshed = true;
                     resolve(isRefreshed);
@@ -2247,11 +1814,14 @@
                             reject(exception);
                         });
                     } else {
-                        errorMessage = "Session hash does not match but session not expired.";
+                        const errorMessage = "Session hash does not match but session not expired.";
                         debugLog("verifyUserSessionInfo " + errorMessage + " from cache: " + userInfoSaved.cr + ". Computed here: " + hash);
                         reject(new Error(errorMessage));
                     }
                 }
+            } else {
+                // user is not logged in do an anonymouse user session refresh
+                resolve(isRefreshed);
             }
         });
     }
@@ -2363,23 +1933,60 @@
     }
 
     /**
+     * When sending data over the network we should make sure it is not going to break the
+     * URL rules. We can't trust data supplied by the game so encode it to be safe.
+     * @param {any} gameData Something considered game data to be sent to the network.
+     * @returns {string} Something considered safe to send over the network.
+     */
+    function safeData(gameData) {
+        let gameDataString;
+        if (typeof gameData != "string") {
+            gameDataString = JSON.stringify(gameData);
+        } else {
+            gameDataString = gameData;
+        }
+        return encodeURIComponent(gameDataString);
+    }
+
+    /**
      * Prepare a score submission to be sent securely to the server. This is an internal function and
      * not designed to be called by client code.
      * @param {integer} siteId Site identifier.
      * @param {integer} userId User who is submitting the score.
      * @param {integer} gameId Game that was played.
-     * @param {integer} score Game final score.
-     * @param {string} gameData JSON string of game-specific play data.
+     * @param {integer} level The game level the score pertains to. Use 0 for final score.
+     * @param {integer} gameScore Game final score.
+     * @param {string|object} gameData Object or JSON string of game-specific play data.
      * @param {integer} timePlayed Game play time related to score and gameData, in milliseconds.
-     * @param {string} sessionId Session id that was given at SessionBegin.
-     * @returns {string} the encrypted score payload or null if an error occurred.
+     * @param {string|null} sessionId Optional session id that was given at SessionBegin. If not provided
+     *   will attempt to use the last recorded session id from SessionBegin or SessionRefresh.
+     * @returns {Promise} A Promise that resolves with the encrypted score payload or null if an error occurred.
      */
-    function encryptScoreSubmit(siteId, userId, gameId, score, gameData, timePlayed, sessionId) {
-        var result = null;
-        var rawScoreString = "site_id=" + siteId.toString() + "&user_id=" + userId.toString() + "&game_id=" + gameId.toString() + "&score=" + score.toString() + "&game_data=" + gameData + "&time_played=" + timePlayed.toString();
-        console.log("Encrypting with " + sessionId + " data " + rawScoreString);
-        result = blowfishWrapper.encryptString(rawScoreString, sessionId);
-        return result;
+    function encryptScoreSubmit(siteId, userId, gameId, level, gameScore, gameData, timePlayed, sessionId) {
+        return new Promise(function(resolve, reject) {
+            let gameDataString;
+            if (typeof gameData !== "string") {
+                gameDataString = JSON.stringify(gameData);
+            } else {
+                gameDataString = gameData;
+            }
+            if (!sessionId) {
+                sessionId = enginesis.sessionId;
+            }
+            encryptString(
+                `site_id=${siteId}&user_id=${userId}&game_id=${gameId}&level_id=${level}&score=${gameScore}&time_played=${timePlayed}&game_data=${gameDataString}`,
+                sessionId
+            ).then(function(encryptedData) {
+                if (encryptedData) {
+                    resolve(encryptedData);
+                } else {
+                    reject(new Error("Internal data encryption failed, verify your session is good."));
+                }
+            })
+            .catch(function(exception) {
+                reject(exception);
+            });
+        });
     }
 
     /**
@@ -2400,37 +2007,37 @@
             if (enginesis.assetUploadQueue == null) {
                 enginesis.assetUploadQueue = [];
             }
-            var errorMessage = "";
-            var errorCode = "";
-            var uploadAttributes = {
+            let errorMessage = "";
+            let errorCode = "";
+            const uploadAttributes = {
                 target: requestType,
                 token: null,
                 uploadId: 0,
                 fileName: fileName,
                 fileSize: fileData.length,
-                serverURL: '',
+                serverURL: "",
                 uploadTime: Date.now()
             };
-            var parameters = {
+            const parameters = {
                 site_id: enginesis.siteId,
                 action: "request",
                 target: uploadAttributes.target,
                 file: uploadAttributes.fileName,
                 size: uploadAttributes.fileSize,
                 game_id: enginesis.gameId
-            }
-            var fetchOptions = {
+            };
+            const fetchOptions = {
                 method: "POST",
                 mode: "cors",
                 credentials: "same-origin",
-                cache: 'default',
+                cache: "default",
                 headers: formatHTTPHeader(),
                 body: convertParamsToFormData(parameters)
             };
             fetch(enginesis.siteResources.assetUploadURL, fetchOptions)
             .then(function (response) {
                 if (response && response.ok) {
-                    var contentType = response.headers.get("content-type");
+                    const contentType = response.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
                         response.json().then(function(enginesisResponse) {
                             // if response is good, add to queue then schedule follow up to do the upload.
@@ -2447,11 +2054,11 @@
                                     })
                                     .catch(function(exception) {
                                         errorCode = "SERVICE_ERROR";
-                                        errorMessage = "Error: " + exception.toString() + " Received from service with " + fileName + " with size " + fileSize + ".";
+                                        errorMessage = "Error: " + exception.toString() + " Received from service with " + fileName + " with size " + uploadAttributes.fileSize + ".";
                                     });
                                 } else {
                                     errorCode = "SERVICE_ERROR";
-                                    errorMessage = "Error: " + enginesisResponse.status.extended_info + " Received from service with " + fileName + " with size " + fileSize + ".";
+                                    errorMessage = "Error: " + enginesisResponse.status.extended_info + " Received from service with " + fileName + " with size " + uploadAttributes.fileSize + ".";
                                 }
                             } else {
                                 errorCode = "SERVICE_ERROR";
@@ -2496,7 +2103,7 @@
      */
     function _completeFileUpload(uploadAttributes, fileData) {
         return new Promise(function(resolve, reject) {
-            var parameters = {
+            const parameters = {
                 site_id: enginesis.siteId,
                 game_id: enginesis.gameId,
                 action: "upload",
@@ -2507,18 +2114,18 @@
                 id: uploadAttributes.uploadId,
                 image: fileData
             };
-            var fetchOptions = {
+            const fetchOptions = {
                 method: "POST",
                 mode: "cors",
                 credentials: "same-origin",
-                cache: 'default',
+                cache: "default",
                 headers: formatHTTPHeader(),
                 body: convertParamsToFormData(parameters)
             };
+            let errorCode = "";
+            let errorMessage = "";
             fetch(enginesis.siteResources.assetUploadURL, fetchOptions)
             .then(function (response) {
-                var errorCode = '';
-                var errorMessage = '';
                 if (response && response.ok) {
                     var contentType = response.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
@@ -2565,6 +2172,89 @@
     }
 
     /**
+     * Encrypt a string of data using the AES CBC algorithm. This is an asynchronous function
+     * that returns a promise that will resolve with the encrypted data encoded in base-64,
+     * or an exception. Failures are usually due to incorrect key format.
+     * @param {string} data String of data to encrypt.
+     * @param {string} key Key must be hex digits represented as string "0123456789abcdef" at least 32 chars in length.
+     * @return {Promise} A Promise that will resolve with a Base-64 encoded encrypted data.
+     */
+    async function encryptString (data, key) {
+        return new Promise(function(resolve, reject) {
+            const encryptMethod = "AES-CBC";
+            window.crypto.subtle.importKey(
+                "raw",
+                stringToByteArray(key),
+                {
+                    name: encryptMethod
+                },
+                true,
+                ["encrypt", "decrypt"]
+            ).then(function(cryptoKey) {
+                const encoder = new TextEncoder();
+                window.crypto.subtle.encrypt(
+                    {
+                        name: encryptMethod,
+                        iv: stringToByteArray(key.substring(3, 16 + 3)),
+                    },
+                    cryptoKey,
+                    encoder.encode(data)
+                )
+                .then(function(cipherData) {
+                    resolve(arrayBufferToBase64(cipherData));
+                })
+                .catch(function(exception) {
+                    reject(exception);
+                });
+            })
+            .catch(function(exception) {
+                reject(exception);
+            });
+        });
+    }
+
+    /**
+     * Decrypt a string that was encrypted with `encryptString()` and the matching key.
+     * @param {string} encryptedData String of base-64 encoded data that was encrypted with key.
+     * @param {string} key Key must be hex digits represented as string "0123456789abcdef".
+     * @return {string} Original data.
+     */
+    async function decryptString(encryptedData, key) {
+        return new Promise(function(resolve, reject) {
+            const encryptMethod = "AES-CBC";
+            window.crypto.subtle.importKey(
+                "raw",
+                stringToByteArray(key),
+                {
+                    name: encryptMethod
+                },
+                true,
+                ["encrypt", "decrypt"]
+            ).then(function(cryptoKey) {
+                window.crypto.subtle.decrypt(
+                    {
+                        name: encryptMethod,
+                        iv: stringToByteArray(key.substring(3, 16 + 3)),
+                    },
+                    cryptoKey,
+                    base64ToArrayBuffer(encryptedData)
+                )
+                .then(function(decryptedData) {
+                    const decoder = new TextDecoder();
+                    const clearData = decoder.decode(decryptedData);
+                    resolve(clearData);
+                })
+                .catch(function(exception) {
+                    reject(exception);
+                });
+            })
+            .catch(function(exception) {
+                reject(exception);
+            });
+        });
+    }
+
+    /**
      * Determine if we have a logged in user.
      * @returns {boolean} True if logged in.
      */
@@ -2575,11 +2265,11 @@
     }
 
     /* ============================================================================ *\
-     | Public methods: functions below this line are intended to be exposed to
-     | external clients.
+     | Public methods: functions below this line are considered public and are
+     | intended to be exposed to external clients.
     \* ============================================================================ */
 
-    var enginesisExport = {
+    const enginesisExport = {
 
     /**
      * Since this is a singleton object this init function is required before any method can
@@ -2639,28 +2329,6 @@
     },
 
     /**
-     * URL safe version of blowfish encrypt algorithm.
-     * Encrypted string is the URL-safe escaped version of base-64: translates +/= to -_~
-     * Uses ECB mode only.
-     * @param {string} data String of data to encrypt with key.
-     * @param {string} key Key must be hex digits represented as string "0123456789abcdef".
-     * @return {string} Base-64 encoded data encrypted with key.
-     */
-    encryptString: function (data, key) {
-        return blowfishWrapper.encryptString(data, key);
-    },
-
-    /**
-     * Decrypt a string that was encrypted with blowfish and the matching key.
-     * @param {string} encryptedData String of data that was encrypted with key.
-     * @param {string} key Key must be hex digits represented as string "0123456789abcdef".
-     * @return {string} Original data.
-     */
-    decryptString: function(encryptedData, key) {
-        return blowfishWrapper.decryptString(encryptedData, key);
-    },
-
-    /**
      * Call any service endpoint.
      * @param {string|object} serviceName If string, the Enginesis service name. If object, expects service name to be in the "fn" property of the object.
      * @param {object|null} parameters Key/value parameters to send with request.
@@ -2696,6 +2364,25 @@
      */
     userIdGet: function() {
         return enginesis.isUserLoggedIn ? Math.floor(enginesis.loggedInUserInfo.user_id) : 0;
+    },
+
+    /**
+     * Return the current session id that was assigned after a SessionBegin or a SessionRefresh.
+     * @returns {string} User's current session id.
+     */
+    sessionIdGet: function() {
+        return enginesis.sessionId;
+    },
+
+    /**
+     * Return the current session id and its expiration. Sessions are assigned after SessionBegin or SessionRefresh.
+     * @returns {object} User's current session information.
+     */
+    sessionGet: function() {
+        return {
+            sessionId: enginesis.sessionId,
+            sessionExpires: enginesis.sessionExpires
+        };
     },
 
     /**
@@ -2831,16 +2518,13 @@
      */
     resume: function() {
         enginesis.isPaused = false;
-        if (enginesis.isUserLoggedIn) {
-            // check expiration of the session and refresh if we need to
-            enginesisContext.sessionRefreshIfExpired()
-            .then(function(isRefreshed) {
-                debugLog("Session was " + (isRefreshed ? "refreshed" : "OK"));
-            })
-            .catch(function(exception) {
-                debugLog("Session sessionRefreshIfExpired exception " + exception.toString());
-            });
-        }
+        enginesisContext.sessionRefreshIfExpired()
+        .then(function(isRefreshed) {
+            debugLog("Session was " + (isRefreshed ? "refreshed" : "OK"));
+        })
+        .catch(function(exception) {
+            debugLog("Session sessionRefreshIfExpired exception " + exception.toString());
+        });
     },
 
     /**
@@ -2906,8 +2590,8 @@
     cleanUserName: function(userName) {
         let cleanName = "";
         if (typeof userName === "string") {
-            cleanName = userName.replace(/[^a-zA-Z0-9_@!~\$\.\-\|\s]/g, '');
-            cleanName = cleanName.trim().replace(/\s+/, ' ');
+            cleanName = userName.replace(/[^a-zA-Z0-9_@!~\$\.\-\|\s]/g, "");
+            cleanName = cleanName.trim().replace(/\s+/, " ");
         }
         return cleanName;
     },
@@ -3140,6 +2824,7 @@
      */
     getGameImageURL: function (parameters) {
         const defaultImageFormat = "png";
+        const defaultGameName = "enginesisTestGame";
         let gameName = null;
         let width = 0;
         let height = 0;
@@ -3162,8 +2847,12 @@
                 height = parameters.height;
             }
         }
-        if (isEmpty(gameName) && enginesis.gameInfo != null) {
-            gameName = enginesis.gameInfo.game_name || "enginesisTestGame";
+        if (isEmpty(gameName)) {
+            if (enginesis.gameInfo != null) {
+                gameName = enginesis.gameInfo.game_name || defaultGameName;
+            } else {
+                gameName = defaultGameName;
+            }
         }
         if (gameName == "quiz" || gameName.substring(0, 5) == "quiz_") {
             gameName = "quiz/" + (parameters.game_id || enginesis.gameInfo.game_id);
@@ -3222,14 +2911,19 @@
      */
     sessionBegin: function (gameKey, gameId, overRideCallBackFunction) {
         const serviceName = "SessionBegin";
+        if ( ! isValidOperationalState()) {
+            return immediateErrorResponse(serviceName, {}, "VALIDATION_FAILED", "The internal system is not in the proper operational state.", overRideCallBackFunction);
+        }
         let siteMark = 0;
         if ( ! enginesis.isUserLoggedIn) {
             cookieSet(enginesis.anonymousUserKey, enginesis.anonymousUser, 60 * 60 * 24, "/", "", true);
             siteMark = enginesis.anonymousUser.userId;
         }
-        var parameters = {
-            game_id: isEmpty(gameId) ? enginesisContext.gameIdGet() : gameId,
-            gamekey: isEmpty(gameKey) ? enginesis.gameKey : gameKey,
+        enginesis.gameId = isEmpty(gameId) ? enginesisContext.gameIdGet() : gameId;
+        enginesis.gameKey = isEmpty(gameKey) ? enginesis.gameKey : gameKey;
+        const parameters = {
+            game_id: enginesis.gameId,
+            gamekey: enginesis.gameKey,
             site_mark: siteMark
         };
         return sendRequest(serviceName, parameters, overRideCallBackFunction);
@@ -3317,7 +3011,6 @@
 
     /**
      * Create a user generated content object on the server and send it to the requested individual.
-     * @param referrer
      * @param fromAddress
      * @param fromName
      * @param toAddress
@@ -3331,16 +3024,15 @@
      * @param {function} overRideCallBackFunction
      * @returns {Promise}
      */
-    gameDataCreate: function (referrer, fromAddress, fromName, toAddress, toName, userMessage, userFiles, gameData, nameTag, addToGallery, lastScore, overRideCallBackFunction) {
+    gameDataCreate: function (fromAddress, fromName, toAddress, toName, userMessage, userFiles, gameData, nameTag, addToGallery, lastScore, overRideCallBackFunction) {
         return sendRequest("GameDataCreate", {
-            referrer: referrer,
             from_address: fromAddress,
             from_name: fromName,
             to_address: toAddress,
             to_name: toName,
             user_msg: userMessage,
             user_files: userFiles,
-            game_data: gameData,
+            game_data: safeData(gameData),
             name_tag: nameTag,
             add_to_gallery: addToGallery ? 1 : 0,
             last_score: lastScore
@@ -3351,7 +3043,6 @@
      * Send to Friend is the classic share a game service. It uses the GameDataCreate service but
      * optimized to sharing a game or a user's completed game that she wants to share with a friend.
      * @param {object} sendAttributes Required and optional parameters to send.
-     *   * `referrer`: Optional, string to indicate the origin of the request. Usually provide the game_name here but it isn't necessary.
      *   * `from_address`: Email address of the sender. Optional is user is logged in, then will use registered user's email. Required if user is not logged in and unauthenticated send is allowed.
      *   * `from_name`: Optional, string indicating sender user's name, used only when from_address is used.
      *   * `to_address`: Required, email address to send to.
@@ -3363,11 +3054,11 @@
      *   * `last_score`: Optional, a game score to provide with the game data and report in the user email.
      *   * `game_image`: Optional, blob, an image to include in the email message.
      * @param {function} overRideCallBackFunction
-     * @returns {Promise} Resolves when the server request completes.
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     sendToFriend: function(sendAttributes, overRideCallBackFunction) {
-        var errorCode = "";
-        var service = "GameDataCreate";
+        const service = "GameDataCreate";
+        let errorCode = "";
         if (( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) && (isEmpty(sendAttributes.from_address) || isEmpty(sendAttributes.from_name))) {
             // if not logged in, fromAddress, fromName must be provided. Otherwise we get it on the server from the logged in user info.
             errorCode = "INVALID_PARAMETER";
@@ -3375,15 +3066,14 @@
             errorCode = "INVALID_GAME_ID";
         }
         if (errorCode == "") {
-            var requestParameters = {
-                referrer: sendAttributes.referrer || "enginesis",
+            const requestParameters = {
                 from_address: sendAttributes.from_address || "",
                 from_name: sendAttributes.from_name || "",
                 to_address: sendAttributes.to_address || "",
                 to_name: sendAttributes.to_name || "User",
                 user_msg: sendAttributes.user_message || "",
                 user_files: "",
-                game_data: sendAttributes.game_data || "",
+                game_data: safeData(sendAttributes.game_data) || "",
                 name_tag: sendAttributes.name_tag || "",
                 add_to_gallery: sendAttributes.add_to_gallery || 0,
                 last_score: sendAttributes.last_score || 0
@@ -3432,7 +3122,7 @@
      * @param {integer} gameId The gameId, if 0 then the gameId set previously will be assumed. gameId is mandatory.
      * @param {integer} categoryId A category id if the game organizes its data configurations by categories. Otherwise use 0.
      * @param {date} airDate A specific date to return game configuration data. Use "" to let the server decide (usually means "today" or most recent.)
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameConfigGet: function (gameConfigId, gameId, categoryId, airDate, overRideCallBackFunction) {
         if (typeof gameConfigId === "undefined") {
@@ -3441,13 +3131,13 @@
         if (typeof gameId === "undefined" || gameId == 0) {
             gameId = enginesisContext.gameIdGet();
         }
-        if (typeof airDate === "undefined") {
-            airDate = "";
+        if (isEmpty(airDate)) {
+            airDate = enginesisContext.getDateNow();
         }
         if (typeof categoryId === "undefined") {
-            categoryId = 0;
+            categoryId = 1;
         }
-        return sendRequest("GameConfigGet", {game_config_id: gameConfigId, game_id: gameId, category_id: categoryId, air_date: airDate}, overRideCallBackFunction);
+        return sendRequest("GameConfigGet", {game_config_id: gameConfigId, game_id: gameId, category: categoryId, air_date: airDate}, overRideCallBackFunction);
     },
 
     /**
@@ -3457,7 +3147,7 @@
      * @param {string} label path in game where event occurred
      * @param {string} hitData a value related to the action, quantifying the action, if any
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameTrackingRecord: function (category, action, label, hitData, overRideCallBackFunction) {
         if (enginesis.isBrowserBuild) {
@@ -3491,7 +3181,7 @@
      * Search for games given a keyword search.
      * @param {string} game_name_part
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameFind: function(game_name_part, overRideCallBackFunction) {
         return sendRequest("GameFind", {game_name_part: game_name_part}, overRideCallBackFunction);
@@ -3501,7 +3191,7 @@
      * Search for games by only searching game names.
      * @param {string} gameName Game name or part of game name to search for.
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameFindByName: function (gameName, overRideCallBackFunction) {
         return sendRequest("GameFindByName", {game_name: gameName}, overRideCallBackFunction);
@@ -3511,7 +3201,7 @@
      * Return game info given a specific game-id.
      * @param {integer} gameId Id of game to get.
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameGet: function (gameId, overRideCallBackFunction) {
         return sendRequest("GameGet", {game_id: gameId}, overRideCallBackFunction);
@@ -3521,7 +3211,7 @@
      * Return game info given the game name.
      * @param {string} gameName
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameGetByName: function (gameName, overRideCallBackFunction) {
         return sendRequest("GameGetByName", {game_name: gameName}, overRideCallBackFunction);
@@ -3532,7 +3222,7 @@
      * @param {integer} numItemsPerCategory
      * @param {integer} gameStatusId
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameListByCategory: function (numItemsPerCategory, gameStatusId, overRideCallBackFunction) {
         return sendRequest("GameListByCategory", {num_items_per_category: numItemsPerCategory, game_status_id: gameStatusId}, overRideCallBackFunction);
@@ -3541,7 +3231,7 @@
     /**
      * Return a list of available game lists for the current site-id.
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameListList: function (overRideCallBackFunction) {
         return sendRequest("GameListList", {}, overRideCallBackFunction);
@@ -3551,7 +3241,7 @@
      * Return the list of games belonging to the requested game list id.
      * @param {integer} gameListId
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameListListGames: function (gameListId, overRideCallBackFunction) {
         return sendRequest("GameListListGames", {game_list_id: gameListId}, overRideCallBackFunction);
@@ -3561,7 +3251,7 @@
      * Return the list of games belonging to the requested game list given its name.
      * @param {string} gameListName
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameListListGamesByName: function (gameListName, overRideCallBackFunction) {
         return sendRequest("GameListListGamesByName", {game_list_name: gameListName}, overRideCallBackFunction);
@@ -3576,7 +3266,7 @@
      * @param {integer} gameIdList
      * @param {string} delimiter
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     gameListByIdList: function (gameIdList, delimiter, overRideCallBackFunction) {
         return sendRequest("GameListByIdList", {game_id_list: gameIdList, delimiter: delimiter}, overRideCallBackFunction);
@@ -3607,9 +3297,16 @@
     },
 
     scoreSubmitUnauth: function (gameId, userName, score, gameData, timePlayed, userSource, overRideCallBackFunction) {
-        var sessionId = enginesis.sessionId;
         // @todo: userName = enginesis.anonymousUser.userName, site_mark = enginesis.anonymousUser.userId;
-        return sendRequest("ScoreSubmitUnauth", {game_id: gameId, session_id: sessionId, user_name: userName, score: score, game_data: gameData, time_played: timePlayed, user_source: userSource}, overRideCallBackFunction);
+        return sendRequest("ScoreSubmitUnauth", {
+            game_id: gameId,
+            session_id: enginesis.sessionId,
+            user_name: userName,
+            score: score,
+            game_data: safeData(gameData),
+            time_played: timePlayed,
+            user_source: userSource
+        }, overRideCallBackFunction);
     },
 
     // ScoreSubmitRankGetUnauth
@@ -3617,11 +3314,37 @@
     // ScoreSubmitForHold
 
     /**
+     * This is a test function to see if we can decrypt in JavaScript an encrypted
+     * payload sent from the Enginesis server.
+     * @param {string} payload Encrypted base-64 data send from the server.
+     * @returns {Promise} A Promise that resolves with a string of the decrypted data payload.
+     * @throws {OperationError} If the key does not match or the data is an incorrect encoding.
+     */
+    decryptServerPayload: function(payload) {
+        return new Promise(function(resolve, reject) {
+            const sessionId = enginesis.sessionId;
+            const safePayload = base64URLDecode(payload);
+            decryptString(safePayload, sessionId)
+            .then(function(decryptedData) {
+                if (decryptedData) {
+                    resolve(decryptedData);
+                } else {
+                    reject(new Error("Not able to decrypt payload from service, verify your session agrees with the server."));
+                }
+            })
+            .catch(function(exception) {
+                reject(exception);
+            });
+        });
+    },
+
+    /**
      * Submit a final game score to the server. This requires a logged in user and a prior
      * call to SessionBegin to establish a game session with the server.
      * @param {integer|null} gameId if 0/null provided we use the gameId set on the Enginesis object. A
-     *    game id is mandatory for sumitting a score.
+     *    game id is mandatory for submitting a score.
      * @param {integer} score a value within the range established for the game.
+     * @param {integer} level The game level the score pertains to. Use 0 for final score.
      * @param {string} gameData option data regarding the game play. This is data specific to the
      *    game but should be in a consistent format for all submissions of that game.
      * @param {integer} timePlayed the number of milliseconds the game was played for the game play
@@ -3629,53 +3352,87 @@
      *    the app was open, etc.)
      * @param {function} overRideCallBackFunction once the server responds resolve to this function.
      *    If not provided then resolves to the global callback function, if set.
-     * @returns {Promise} once the server responds resolve to this function.
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
-    scoreSubmit: function (gameId, score, gameData, timePlayed, overRideCallBackFunction) {
-        var service = "ScoreSubmit";
-        var sessionId = enginesis.sessionId;
-        var submitString;
-        var errorCode = "";
+    scoreSubmit: function (gameId, score, level, gameData, timePlayed, overRideCallBackFunction) {
+        return new Promise(function(resolve) {
+            const service = "ScoreSubmit";
+            const sessionId = enginesis.sessionId;
+            let errorCode = "";
 
-        // verify user is logged in, cannot submit a score if no one is logged in. A logged in user
-        // should also have a valid session (SessionBegin must have been called). And of course a
-        // game-id is required.
-        if ( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) {
-            errorCode = "NOT_LOGGED_IN";
-        } else if (sessionId == null) {
-            errorCode = "INVALID_SESSION";
-        } else {
-            if (isEmpty(gameId)) {
-                gameId = enginesis.gameId;
+            function respondWithError(errorCode, errorMessage) {
+                const parameters = {
+                    game_id: gameId,
+                    level_id: level,
+                    score: score,
+                    game_data: gameData,
+                    time_played: timePlayed
+                };
+                const enginesisResult = forceErrorResponseObject(service, 0, errorCode, errorMessage, parameters);
+                callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
+            }
+
+            if ( ! enginesis.authTokenWasValidated || Math.floor(enginesis.loggedInUserInfo.user_id) == 0) {
+                errorCode = "NOT_LOGGED_IN";
+            } else if (sessionId == null) {
+                errorCode = "INVALID_SESSION";
+            } else {
                 if (isEmpty(gameId)) {
-                    errorCode = "INVALID_GAME_ID";
+                    gameId = enginesis.gameId;
+                    if (isEmpty(gameId)) {
+                        errorCode = "INVALID_GAME_ID";
+                    }
+                    // @todo: verify gameId matches session
                 }
             }
-        }
-        if (errorCode == "") {
-            submitString = encryptScoreSubmit(enginesis.siteId, enginesis.loggedInUserInfo.user_id, gameId, score, gameData, timePlayed, sessionId);
-            if (submitString == null) {
-                errorCode = "INVALID_PARAMETER";
+            if (errorCode == "") {
+                encryptScoreSubmit(enginesis.siteId, enginesis.loggedInUserInfo.user_id, gameId, level, score, gameData, timePlayed, sessionId)
+                .then(function(submitString) {
+                    if (submitString) {
+                        sendRequest(
+                            service,
+                            {
+                                data: base64URLEncode(submitString)
+                            },
+                            overRideCallBackFunction
+                        ).then(function(enginesisResult) {
+                            resolve(enginesisResult);
+                        })
+                        .catch(function(exception) {
+                            respondWithError(
+                                "SYSTEM_ERROR",
+                                "Exception encountered while exchanging score with server: " + exception.toString()
+                            );
+                        });
+                    } else {
+                        respondWithError(
+                            "SYSTEM_ERROR",
+                            "System error encountered while processing score submit."
+                        );
+                    }
+                })
+                .catch(function(exception) {
+                    respondWithError(
+                        "INVALID_PARAMETER",
+                        "Exception encountered while processing score submit: " + exception.toString()
+                    );
+                });
+            } else {
+                respondWithError(
+                    errorCode,
+                    "Error encountered while processing score submit."
+                );
             }
-        }
-        if (errorCode == "") {
-            return sendRequest(service, {data: submitString}, overRideCallBackFunction);
-        } else {
-            return immediateErrorResponse(service, {game_id: gameId, score: score, game_data: gameData, time_played: timePlayed}, errorCode, "Error encountered while processing score submit.", overRideCallBackFunction);
-        }
+        });
     },
 
     // ScoreSubmitRankGet
     // ScoreSubmitRankList
 
-    scoreRankList: function(gameId, timePeriodType, timePeriod, startRank, numberOfRanks, overRideCallBackFunction) {
-        var service = "ScoreRankList";
-        var errorCode = "";
+    scoreRankList: function (gameId, level, timePeriodType, timePeriod, startRank, numberOfRanks, overRideCallBackFunction) {
+        const service = "ScoreRankList";
         if (isEmpty(gameId)) {
             gameId = enginesis.gameId;
-            if (isEmpty(gameId)) {
-                errorCode = "INVALID_GAME_ID";
-            }
         }
         if (isEmpty(timePeriodType)) {
             timePeriodType = 0;
@@ -3689,8 +3446,9 @@
         if (isEmpty(numberOfRanks)) {
             numberOfRanks = 100;
         }
-        var parameters = {
+        const parameters = {
             game_id: gameId,
+            level_id: level,
             time_period_type: timePeriodType,
             time_period: timePeriod,
             start_rank: startRank,
@@ -3735,7 +3493,7 @@
 
     registeredUserCreate: function (userName, password, email, realName, dateOfBirth, gender, city, state, zipcode, countryCode, mobileNumber, imId, tagline, siteUserId, networkId, agreement, securityQuestionId, securityAnswer, imgUrl, aboutMe, additionalInfo, sourceSiteId, captchaId, captchaResponse, overRideCallBackFunction) {
         return sendRequest("RegisteredUserCreate", {
-            site_id: siteId,
+            site_id: enginesis.siteId,
             captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
             captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse,
             user_name: userName,
@@ -3754,8 +3512,8 @@
             im_id: imId,
             agreement: agreement,
             security_question_id: 1,
-            security_answer: '',
-            img_url: '',
+            security_answer: "",
+            img_url: "",
             about_me: aboutMe,
             tagline: tagline,
             additional_info: additionalInfo,
@@ -3765,7 +3523,7 @@
 
     registeredUserUpdate: function (userName, password, email, realName, dateOfBirth, gender, city, state, zipcode, countryCode, mobileNumber, imId, tagline, siteUserId, networkId, agreement, securityQuestionId, securityAnswer, imgUrl, aboutMe, additionalInfo, sourceSiteId, captchaId, captchaResponse, overRideCallBackFunction) {
         return sendRequest("RegisteredUserUpdate", {
-            site_id: siteId,
+            site_id: enginesis.siteId,
             captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
             captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse,
             user_name: userName,
@@ -3779,7 +3537,7 @@
             country_code: countryCode,
             mobile_number: mobileNumber,
             im_id: imId,
-            img_url: '',
+            img_url: "",
             about_me: aboutMe,
             tagline: tagline,
             additional_info: additionalInfo
@@ -3788,7 +3546,7 @@
 
     registeredUserSecurityUpdate: function (captchaId, captchaResponse, security_question_id, security_question, security_answer, overRideCallBackFunction) {
         return sendRequest("RegisteredUserSecurityUpdate", {
-            site_id: siteId,
+            site_id: enginesis.siteId,
             captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
             captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse,
             security_question_id: security_question_id,
@@ -3804,7 +3562,7 @@
      * @param user_id
      * @param secondary_password
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     registeredUserConfirm: function (user_id, secondary_password, overRideCallBackFunction) {
         return sendRequest("RegisteredUserConfirm", {user_id: user_id, secondary_password: secondary_password}, overRideCallBackFunction);
@@ -3817,7 +3575,7 @@
      * @param {string} userName
      * @param {string} email
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     registeredUserForgotPassword: function (userName, email, overRideCallBackFunction) {
         return sendRequest("RegisteredUserForgotPassword", {user_name: userName, email: email}, overRideCallBackFunction);
@@ -3832,7 +3590,7 @@
      * @param {string} email_address - identify the user by email address
      * @param {string} secondary_password - the original secondary password generated in forgot password flow.
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     registeredUserResetSecondaryPassword: function (user_id, user_name, email_address, secondary_password, overRideCallBackFunction) {
         return sendRequest("RegisteredUserResetSecondaryPassword", {
@@ -3852,7 +3610,7 @@
     // @todo: Should include the user-id?
     registeredUserPasswordChange: function (captchaId, captchaResponse, password, secondary_password, overRideCallBackFunction) {
         return sendRequest("RegisteredUserPasswordChange", {
-            site_id: siteId,
+            site_id: enginesis.siteId,
             captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
             captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse,
             password: password,
@@ -3863,7 +3621,7 @@
     registeredUserSecurityGet: function (overRideCallBackFunction) {
         return sendRequest("RegisteredUserSecurityGet", {
             site_id: enginesis.siteId,
-            site_user_id: ''
+            site_user_id: ""
         }, overRideCallBackFunction);
     },
 
@@ -3913,7 +3671,7 @@
      * login provides information about the user.
      * @param {string} userName The user name or email to identify the user.
      * @param {string} password The user's password which should conform to the password rules.
-     * @returns {Promise} A promise that resolves with the server's response.
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userLogin: function(userName, password, overRideCallBackFunction) {
         return sendRequest("UserLogin", {user_name: userName, password: password}, overRideCallBackFunction);
@@ -3935,6 +3693,7 @@
      *   scope
      * @param {integer} networkId We must know which network this registration comes from.
      * @param {function} overRideCallBackFunction {function} called when server replies.
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userLoginCoreg: function (registrationParameters, networkId, overRideCallBackFunction) {
         if (typeof registrationParameters.siteUserId === "undefined" || registrationParameters.siteUserId.length == 0) {
@@ -4008,14 +3767,14 @@
         } else if (size > 2) {
             size = 2;
         }
-        return enginesis.siteResources.avatarImageURL + '?site_id=' + enginesis.siteId + '&user_id=' + userId + '&size=' + size;
+        return enginesis.siteResources.avatarImageURL + "?site_id=" + enginesis.siteId + "&user_id=" + userId + "&size=" + size;
     },
 
     /**
      * Get information about a specific quiz.
      * @param {integer} quiz_id
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     quizGet: function (quiz_id, overRideCallBackFunction) {
         return sendRequest("QuizGet", {game_id: quiz_id}, overRideCallBackFunction);
@@ -4027,7 +3786,7 @@
      * @param {integer} quiz_id
      * @param {integer} game_group_id
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     quizPlay: function (quiz_id, game_group_id, overRideCallBackFunction) {
         return sendRequest("QuizPlay", {game_id: quiz_id, game_group_id: game_group_id}, overRideCallBackFunction);
@@ -4039,7 +3798,7 @@
      * @param {integer} quiz_id if a specific quiz id is requested we try to return this one. If for some reason we cannot, the next quiz in the scheduled series is returned.
      * @param {integer} game_group_id quiz group id.
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     quizPlayScheduled: function (quiz_id, game_group_id, overRideCallBackFunction) {
         return sendRequest("QuizPlayScheduled", {game_id: quiz_id, game_group_id: game_group_id}, overRideCallBackFunction);
@@ -4050,7 +3809,7 @@
      * @param {integer} quiz_id
      * @param {integer} game_group_id
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     quizOutcomesCountList: function(quiz_id, game_group_id, overRideCallBackFunction) {
         return sendRequest("QuizOutcomesCountList", {game_id: quiz_id, game_group_id: game_group_id}, overRideCallBackFunction);
@@ -4061,7 +3820,7 @@
      * @param {integer} quiz_id
      * @param {object} results
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     quizSubmit: function(quiz_id, results, overRideCallBackFunction) {
         return sendRequest("QuizSubmit", {game_id: quiz_id, results: results}, overRideCallBackFunction);
@@ -4075,7 +3834,7 @@
      * @param {integer} question_id
      * @param {integer} choice_id
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     quizQuestionPlayed: function(quiz_id, question_id, choice_id, overRideCallBackFunction) {
         return sendRequest("QuizQuestionPlayed", {game_id: quiz_id, question_id: question_id, choice_id: choice_id}, overRideCallBackFunction);
@@ -4097,6 +3856,7 @@
         if (typeof callBackFunction === "function" && enginesis.favoriteGamesNextCheck < Date.now()) {
             enginesisContext.userFavoriteGamesList()
             .then(function(enginesisResult) {
+                // @todo: handle error from enginesisResult
                 callBackFunction(gameId, enginesis.favoriteGames.has(gameId));
             });
         }
@@ -4106,7 +3866,7 @@
     /**
      * Get list of users favorite games. User must be logged in.
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesList: function (overRideCallBackFunction) {
         // @todo: wait until timer expires? Or do it now because caller wants it now?
@@ -4119,7 +3879,7 @@
      * Assign a game-id to the list of user favorite games. User must be logged in.
      * @param {integer} game_id
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesAssign: function(game_id, overRideCallBackFunction) {
         const serviceName = "UserFavoriteGamesAssign";
@@ -4132,7 +3892,7 @@
             const errorCode = "NOT_AUTHENTICATED";
             const errorMessage = "You must log in to update your favorite games.";
             anonymousUserSave();
-            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction)
+            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction);
         } else {
             return sendRequest(serviceName, serviceParameters, overRideCallBackFunction);
         }
@@ -4142,23 +3902,23 @@
      * Assign a list of game-ids to the list of user favorite games. User must be logged in. List is separated by commas.
      * @param {integer} game_id_list
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesAssignList: function(game_id_list, overRideCallBackFunction) {
         var gameIdList = game_id_list.split(",");
         for (var i = 0; i < gameIdList.length; i ++) {
             enginesis.favoriteGames.add(gameIdList[i]);
         }
-        var serviceName = "UserFavoriteGamesAssignList";
-        var serviceParameters = {
+        const serviceName = "UserFavoriteGamesAssignList";
+        const serviceParameters = {
             game_id_list: game_id_list,
-            delimiter: ','
+            delimiter: ","
         };
         if ( ! enginesis.isUserLoggedIn) {
             const errorCode = "NOT_AUTHENTICATED";
             const errorMessage = "You must log in to update your favorite games.";
             anonymousUserSave();
-            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction)
+            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction);
         } else {
             return sendRequest(serviceName, serviceParameters, overRideCallBackFunction);
         }
@@ -4168,7 +3928,7 @@
      * Remove a game-id from the list of user favorite games. User must be logged in.
      * @param {integer|null} game_id
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesUnassign: function(game_id, overRideCallBackFunction) {
         const gameId = game_id || enginesis.gameId;
@@ -4181,7 +3941,7 @@
             const errorCode = "NOT_AUTHENTICATED";
             const errorMessage = "You must log in to update your favorite games.";
             anonymousUserSave();
-            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction)
+            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction);
         } else {
             return sendRequest(serviceName, serviceParameters, overRideCallBackFunction);
         }
@@ -4191,23 +3951,23 @@
      * Remove a list of game-ids from the list of user favorite games. User must be logged in. List is separated by commas.
      * @param {integer} game_id_list
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesUnassignList: function(game_id_list, overRideCallBackFunction) {
         var gameIdList = game_id_list.split(",");
         for (var i = 0; i < gameIdList.length; i ++) {
             enginesis.favoriteGames.delete(gameIdList[i]);
         }
-        var serviceName = "UserFavoriteGamesUnassignList";
-        var serviceParameters = {
+        const serviceName = "UserFavoriteGamesUnassignList";
+        const serviceParameters = {
             game_id_list: game_id_list,
-            delimiter: ','
+            delimiter: ","
         };
         if ( ! enginesis.isUserLoggedIn) {
             const errorCode = "NOT_AUTHENTICATED";
             const errorMessage = "You must log in to update your favorite games.";
             anonymousUserSave();
-            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction)
+            return immediateErrorResponse(serviceName, serviceParameters, errorCode, errorMessage, overRideCallBackFunction);
         } else {
             return sendRequest(serviceName, serviceParameters, overRideCallBackFunction);
         }
@@ -4218,7 +3978,7 @@
      * @param {integer} game_id
      * @param {integer} sort_order
      * @param {function} overRideCallBackFunction
-     * @returns {Promise}
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesMove: function(game_id, sort_order, overRideCallBackFunction) {
         return sendRequest("UserFavoriteGamesMove", {game_id: game_id, sort_order: sort_order}, overRideCallBackFunction);
@@ -4348,13 +4108,13 @@
     // Conference services
     // ===========================================================================================================
     conferenceAssetRootPath: function(conferenceId) {
-        return '//' + enginesis.serverHost + '/sites/' + enginesis.siteId + '/conf/' + conferenceId + '/';
+        return "//" + enginesis.serverHost + "/sites/" + enginesis.siteId + "/conf/" + conferenceId + "/";
     },
 
     conferenceGet: function(conferenceId, overRideCallBackFunction) {
         var visibleId;
         if (parseInt(conferenceId, 10) > 0) {
-            visibleId = '';
+            visibleId = "";
         } else {
             visibleId = conferenceId;
             conferenceId = 0;
@@ -4365,7 +4125,7 @@
     conferenceTopicGet: function(conferenceId, conferenceTopicId, overRideCallBackFunction) {
         var visibleId;
         if (parseInt(conferenceId, 10) > 0) {
-            visibleId = '';
+            visibleId = "";
         } else {
             visibleId = conferenceId;
             conferenceId = 0;
@@ -4376,21 +4136,28 @@
     conferenceTopicList: function(conferenceId, tags, startDate, endDate, startItem, numItems, overRideCallBackFunction) {
         var visibleId;
         if (parseInt(conferenceId, 10) > 0) {
-            visibleId = '';
+            visibleId = "";
         } else {
             visibleId = conferenceId;
             conferenceId = 0;
         }
         return sendRequest("ConferenceTopicList", {conference_id: conferenceId, visible_id: visibleId, tags: tags, start_date: startDate, end_date: endDate, start_item: startItem, num_items: numItems}, overRideCallBackFunction);
+    },
+
+    // @private: Exported private functions for unit testing only
+    _private: {
+        sessionValidateHash: sessionVerifyHash,
+        sessionMakeHash: sessionMakeHash
     }
-    };
+    // @private:
+    }; // enginesisExport
 
     /* ----------------------------------------------------------------------------------
      * Setup for AMD, node, or standalone reference the enginesis object.
      * ----------------------------------------------------------------------------------*/
-    if (typeof define === 'function' && define.amd) {
+    if (typeof define === "function" && define.amd) {
         define(function () { return enginesisExport; });
-    } else if (typeof exports === 'object') {
+    } else if (typeof exports === "object") {
         module.exports = enginesisExport;
     } else {
         var existingEnginesis = window.enginesis;
@@ -4401,3 +4168,4 @@
         window.enginesis = enginesisExport;
     }
 })(this);
+ 

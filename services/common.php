@@ -21,18 +21,35 @@ require_once('version.php');
 require_once('serverConfig.php');
 require_once('Enginesis.php');
 require_once('LogMessage.php');
-if (isset($_SERVER['DOCUMENT_ROOT']) && strlen($_SERVER['DOCUMENT_ROOT']) > 0) {
-    define('ROOTPATH', $_SERVER['DOCUMENT_ROOT'] . '/');
-    $serverRootPath = dirname(ROOTPATH) . '/';
+if ( ! empty($_SERVER['DOCUMENT_ROOT'])) {
+    define('ROOTPATH', $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR);
+    $serverRootPath = dirname(ROOTPATH) . DIRECTORY_SEPARATOR;
 } else {
-    define('ROOTPATH', '../');
+    $siteRoot = getcwd();
+    while (true) {
+        // check if current dir has data folder
+        if (is_dir($siteRoot . DIRECTORY_SEPARATOR . 'public') && is_dir($siteRoot . DIRECTORY_SEPARATOR . 'data')) {
+            $siteRoot = rtrim($siteRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+            break;
+        }
+        // if not, go up one level
+        $pathComponents = explode(DIRECTORY_SEPARATOR, $siteRoot);
+        if (count($pathComponents) > 1) {
+            array_pop($pathComponents);
+            $siteRoot = implode(DIRECTORY_SEPARATOR, $pathComponents);
+        } else {
+            $siteRoot = '..' . DIRECTORY_SEPARATOR;
+            break;
+        }
+    }
+    define('ROOTPATH', $siteRoot);
     $serverRootPath = ROOTPATH;
 }
 define('SERVER_ROOT', $serverRootPath);
-define('SERVER_DATA_PATH', $serverRootPath . 'data/');
-define('SERVER_PRIVATE_PATH', $serverRootPath . 'private/');
-define('SERVICE_ROOT', $serverRootPath . 'services/');
-define('VIEWS_ROOT', $serverRootPath . 'views/');
+define('SERVER_DATA_PATH', $serverRootPath . 'data' . DIRECTORY_SEPARATOR);
+define('SERVER_PRIVATE_PATH', $serverRootPath . 'private' . DIRECTORY_SEPARATOR);
+define('SERVICE_ROOT', $serverRootPath . 'services' . DIRECTORY_SEPARATOR);
+define('VIEWS_ROOT', $serverRootPath . 'views' . DIRECTORY_SEPARATOR);
 
 /**
  * Turn on or off all error reporting. Typically we want this on for development, off for production.
@@ -206,17 +223,19 @@ function saveQueryString ($parameters = null) {
 }
 
 function cleanXmlEntities ($string) {
-    return str_replace(array('&', '"', "'", '<', '>'), array('&amp;', '&quot;', '&apos;', '&lt;', '&gt;'), $string);
+    return str_replace(['&', '"', "'", '<', '>'], ['&amp;', '&quot;', '&apos;', '&lt;', '&gt;'], $string);
 }
 
+/**
+ * Return the protocol (http or https) the current server is running. This is designed to be used to help create fully qualified
+ * URLs for client links so they match the current protocol.
+ * @return string Current protocol (https|http).
+ */
 function getServiceProtocol () {
-    // return http or https. you should use the result of this and never hard-code http:// into any URLs.
     if (isset($_SERVER['HTTPS']) && ($_SERVER['HTTPS'] == 'on' || $_SERVER['HTTPS'] == 1) || isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https') {
-        $protocol = 'https';
-    } else {
-        $protocol = 'http';
+        return 'https';
     }
-    return $protocol;
+    return 'http';
 }
 
 /**
@@ -465,7 +484,7 @@ function xorString($string, $key) {
  * Generate random salt, can only be used with the exact password match.
  * This calls PHP's crypt function with the specific setup for blowfish. mcrypt is a required PHP module.
  * @param string the user's password
- * @returns string the hashed password.
+ * @return string the hashed password.
  */
 function hashPassword ($password) {
     $chars = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -480,7 +499,7 @@ function hashPassword ($password) {
  * Test a password and the user's stored hash of that password
  * @param string the user's password
  * @param string the password we looked up in the database
- * @returns bool true if the password is a match. false if password does not match.
+ * @return bool true if the password is a match. false if password does not match.
  */
 function verifyHashPassword ($password, $hashStoredInDatabase) {
     return ! empty($password) && ! empty($hashStoredInDatabase) && $hashStoredInDatabase == crypt($password, $hashStoredInDatabase);
@@ -523,7 +542,7 @@ function getURLContents ($url, $get_params = null, $post_params = null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $post_string);
         }
         if (startsWith(strtolower($url), 'https://')) {
-            $sslCertificate = dirname(__FILE__) . '/../private/cacert.pem';
+            $sslCertificate = SERVER_PRIVATE_PATH . 'cacert.pem';
             if (file_exists($sslCertificate)) {
                 curl_setopt($ch, CURLOPT_CAINFO, $sslCertificate);
             } else {
@@ -633,10 +652,7 @@ function verifyStage($includePassedTests = false) {
  * @return string Server domain.
  */
 function getCurrentDomain() {
-    return
-        'http' . (isset($_SERVER['HTTPS']) ? 's' : '')
-        . '://'
-        . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN);
+    return getServiceProtocol() . '://' . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN);
 }
 
 /**
@@ -1284,8 +1300,8 @@ function isValidId($id) {
  * Performs basic user name validation. A user name must be between 3 and 20 characters
  *   and we only accept certain characters (a-z, 0-9,_ - . $ @ ! | ~. Note that a user name may contain
  *   only digits, and then we have to decide if it is a user name or a user-id.
- * @param $userName string The user name to check.
- * @returns bool true if acceptable otherwise false.
+ * @param string The user name to check.
+ * @return bool true if acceptable otherwise false.
  */
 function isValidUserName ($userName) {
     $len = strlen(trim($userName));
@@ -1305,7 +1321,7 @@ function cleanUserName ($userName) {
  * Performs basic user password validation. The password can be any printable characters between 4 and 20 in length
  * with no leading or trailing spaces.
  * @param string $password The password to check.
- * @returns bool true if acceptable otherwise false.
+ * @return bool true if acceptable otherwise false.
  */
 function isValidPassword ($password) {
     $len = strlen(trim($password));
@@ -1560,7 +1576,7 @@ function ageFromDate ($checkDate, $referenceDate = null) {
  * Generate a (hopefully) unique site mark. This is a pseudo-user-id to accommodate anonymous users who
  * use the site and we need to generate a unique session id on their behalf and not have it clash with
  * any other anonymous user on the site in this day-stamp window of time.
- * @return {int} mock user-id. Should be a minimum of 6 digits.
+ * @return int A mock user-id. Should be a minimum of 6 digits.
  */
 function makeSiteMark() {
     return mt_rand(187902, mt_getrandmax());
@@ -1568,7 +1584,7 @@ function makeSiteMark() {
 
 /**
  * Return the HTTP authorization headers. This is where we expect to find our authentication token.
- * @returns {string|null} The authorization header, or null if it was not sent in this request.
+ * @return {string|null} The authorization header, or null if it was not sent in this request.
  */
 function getAuthorizationHeader () {
     $headers = null;
@@ -1590,7 +1606,7 @@ function getAuthorizationHeader () {
 
 /**
  * Find and return the Bearer token supplied in the HTTP request, if it's there.
- * @returns {string|null} the HTTP bearer token or null if it was not sent.
+ * @return {string|null} the HTTP bearer token or null if it was not sent.
  */
 function getBearerTokenInRequest() {
     $headers = getAuthorizationHeader();
@@ -1814,7 +1830,8 @@ $enginesisLogger = new LogMessage([
     'log_active' => true,
     'log_level' => LogMessageLevel::All,
     'log_to_output' => false,
-    'log_to_file' => true
+    'log_to_file' => true,
+    'log_file_path' => SERVER_DATA_PATH . 'logs' . DIRECTORY_SEPARATOR
 ]);
 $page = '';
 $webServer = '';
