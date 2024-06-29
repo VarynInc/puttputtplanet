@@ -11,5 +11,5 @@
     "sourcePath": "./",
     "sshKeyFile": "~/.ssh/varyn-aws.pem",
     "debug": true,
-    "logFile": "data/logs/deploy.log"
+    "logFile": "data/deploy-logs/deploy.log"
 }
