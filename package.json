@@ -1,6 +1,7 @@
 {
     "name": "puttputtplanet",
-    "version": "1.0.2",
+    "type": "module",
+    "version": "1.0.4",
     "description": "Putt Putt Planet website",
     "main": "bin/build.js",
     "scripts": {
@@ -8,7 +9,8 @@
       "clean": "rm -rf ./node_modules && rm -rf ./distrib && rm ./data/logs/*.log",
       "deploy": "node bin/deploy.js --config=bin/deploy-config.json",
       "sitemap": "node bin/sitemap.js",
-      "test": "jest test"
+      "test": "jest test",
+      "versionup": "node bin/versionUp.js --debug --task build --path ./"
     },
     "repository": {
       "type": "git",

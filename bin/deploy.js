@@ -1,17 +1,21 @@
 /**
  * Deploy the local site to -d or -q
- * Test and verify deploy with `npm run deploy`
- * Deploy with `npm run deploy -- --no-dryrun`
+ * Run deploy with `npm run deploy` for a dry-run and verify what files will deploy.
+ * Run `npm run deploy -- --no-dryrun` to actually copy/replace/delete files on the destination server.
  * Test and verify on target stage, e.g. https://puttputtplanet-q.com
  */
+import Rsync from "rsync";
+import chalk from "chalk";
+import fs from "fs";
+import path from "path";
+import shelljs from "shelljs";
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+
+const defaultConfigurationFilePath = "bin/deploy-config.json";
 let rsyncFlags = "zrptcv";
 let debug = false;
 let configuration = {};
-const Rsync = require("rsync");
-const Chalk = require("chalk");
-const fs = require("fs");
-require('shelljs/global');
-const defaultConfigurationFilePath = "bin/deploy-config.json";
 
 /**
  * Set defaults for things that we may not receive from the configuration file
@@ -21,7 +25,7 @@ const defaultConfigurationFilePath = "bin/deploy-config.json";
 const configurationDefault = {
     site: "puttputtplanet",
     targetstage: "-q",
-    isDryRun: false,
+    isDryRun: true,
     destinationHost: "",
     destinationUser: "",
     destinationPassword: "",
@@ -46,6 +50,8 @@ function loadConfigurationData(configurationFilePath) {
         let rawData = fs.readFileSync(configurationFilePath);
         if (rawData != null) {
             return JSON.parse(rawData) || {};  
+        } else {
+            immediateLog(configurationFilePath + " has no data", true);
         }
     }
     return {};
@@ -61,7 +67,7 @@ function mergeConfigurationData(configurationDefault) {
     const args = getArgs();
     debug = args.verbose;
     let configuration;
-    let configurationFilePath = args.config || defaultConfigurationFilePath;
+    let configurationFilePath = args.conf || defaultConfigurationFilePath;
     if (configurationFilePath.length > 0) {
         configuration = loadConfigurationData(configurationFilePath);
         if (Object.keys(configuration).length === 0) {
@@ -69,6 +75,8 @@ function mergeConfigurationData(configurationDefault) {
         } else {
             immediateLog("Loading configuration from " + configurationFilePath, false);
         }
+    } else {
+        immediateLog("No configuration defined " + configurationFilePath, true);
     }
     for (let property in configurationDefault) {
         if (property != "configurationFile" && configurationDefault.hasOwnProperty(property) && ! configuration.hasOwnProperty(property)) {
@@ -90,6 +98,9 @@ function mergeConfigurationData(configurationDefault) {
  * @return {object} Configuration information.
  */
 function mergeArgs(args, configuration) {
+    if (args.conf) {
+        configuration.configurationFile = args.conf;
+    }
     if (args.destination) {
         configuration.destinationPath = args.destination;
     }
@@ -123,7 +134,7 @@ function mergeArgs(args, configuration) {
     if (args.hasOwnProperty('dryrun')) {
         configuration.isDryRun = args.dryrun;
     }
-    console.log(Chalk.blue("isDryRun is " + (configuration.isDryRun?"true":"false")));
+    immediateLog(chalk.blue("isDryRun is " + (configuration.isDryRun ? "true" : "false")), false);
     return configuration;
 }
 
@@ -132,9 +143,9 @@ function mergeArgs(args, configuration) {
  * @return {object} Args object.
  */
 function getArgs() {
-    const args = require("yargs")
-    .options({
-        "config": {
+    const args = yargs(hideBin(process.argv));
+    args.options({
+        "conf": {
             alias: "c",
             type: "string",
             describe: "path to config file",
@@ -211,9 +222,8 @@ function getArgs() {
         },
     })
     .alias("?", "help")
-    .help()
-    .argv;
-    return args;
+    .help();
+    return args.argv;
 }
 
 /**
@@ -225,7 +235,7 @@ function writeToLogFile(message) {
         try {
             fs.appendFileSync(configuration.logFile, message + "\r\n");
         } catch (err) {
-            console.log(Chalk.red("Error writing to " + configuration.logFile + ": " + err));
+            console.log(chalk.red("Error writing to " + configuration.logFile + ": " + err));
         }
     }
 }
@@ -236,7 +246,7 @@ function writeToLogFile(message) {
  */
 function errorLog(message) {
     if (debug) {
-        console.log(Chalk.red(message));
+        console.log(chalk.red(message));
         writeToLogFile(message);
     }
 }
@@ -247,7 +257,7 @@ function errorLog(message) {
  */
 function debugLog(message) {
     if (debug) {
-        console.log(Chalk.green(message));
+        console.log(chalk.green(message));
         writeToLogFile(message);
     }
 }
@@ -258,29 +268,25 @@ function debugLog(message) {
  */
 function immediateLog(message, error = true) {
     if (error) {
-        console.log(Chalk.red(message));
+        console.log(chalk.red(message));
     } else {
-        console.log(Chalk.blue(message));
+        console.log(chalk.blue(message));
     }
     writeToLogFile(message);
 }
 
 function updateBuildInfoFile() {
-    var path = require('path'),
-        buildFileName = 'build-info.json',
-        buildFolder = './public',
-        user = env['USER'],
-        package_name = env['npm_package_name'],
-        version = env['npm_package_version'],
-        buildFile = path.join(buildFolder, buildFileName),
-        currentDateTime = (new Date()).toISOString(),
-        buildInfo = {
-            packageName: package_name,
-            version: version,
+    const buildFileName = 'build-info.json';
+    const buildFolder = './public';
+    const buildFile = path.join(buildFolder, buildFileName);
+    const currentDateTime = new Date().toLocaleString();
+    const buildInfo = {
+            site: process.env.npm_package_name,
+            version: process.env.npm_package_version,
             publish_date: currentDateTime,
-            user: user
+            user: process.env.USER
         };
-    echo(JSON.stringify(buildInfo)).to(buildFile);
+    shelljs.echo(JSON.stringify(buildInfo)).to(buildFile);
 }
 
 function deploy(configuration) {
@@ -291,7 +297,7 @@ function deploy(configuration) {
     const dryRunFlag = "n";
     let sshCommand = "ssh";
     let destinationPath;
-    let logMessage = "Deploying " + site + " to " + configuration.targetstage + " on " + (new Date).toISOString();
+    let logMessage = "Deploying " + site + " " + sourcePath + " with target stage " + configuration.targetstage + " on " + (new Date).toISOString();
 
     if (configuration.destinationUser.length > 0 && configuration.destinationHost.length > 0) {
         destinationPath = configuration.destinationUser + "@" + configuration.destinationHost + ":" + configuration.destinationPath;
@@ -303,15 +309,15 @@ function deploy(configuration) {
     }
     if (isDryRun) {
         rsyncFlags += dryRunFlag;
-        logMessage += " -- This is a DRY RUN - no files will be copied."
+        logMessage += " -- This is a DRY RUN - no files will be copied.";
     } else {
         updateBuildInfoFile();
     }
     if (configuration.sshKeyFile) {
         sshCommand += " -i " + configuration.sshKeyFile;
     }
+
     immediateLog(logMessage, false);
-    immediateLog("Syncing " + site + " " + sourcePath + " with target stage " + configuration.targetstage + " " + configuration.destinationPath, false);
     debugLog("sourcePath " + sourcePath);
     debugLog("destinationPath " + destinationPath);
     debugLog("sshCommand " + sshCommand);
@@ -335,13 +341,12 @@ function deploy(configuration) {
     }
 
     rsync.execute(function(error, exitCode, cmd) {
-        const timeNow = (new Date).toISOString();
         if (error) {
-            immediateLog("Site deploy fails for " + site + " " + error.toString() + " at " + timeNow);
+            immediateLog("Site deploy fails for " + site + " " + error.toString());
         } else if (isDryRun) {
-            immediateLog("Site dry run for " + site + " complete at "  + timeNow);
+            immediateLog("Site dry run for " + site + " complete.");
         } else {
-            immediateLog("Site deploy for " + site + " complete at "  + timeNow);
+            immediateLog("Site deploy for " + site + " complete.");
         }
     }, function (output) {
         // stdout
