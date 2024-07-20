@@ -6,8 +6,8 @@
  * Date: Feb-13-2016
  */
 date_default_timezone_set('America/New_York');
-define('LOGFILE_PREFIX', 'puttputtplanet');
 define('SITE_SESSION_COOKIE', 'pppuser');
+define('ENGINESIS_SITE_KEY', 'puttputtplanet');
 define('ENGINESIS_SITE_NAME', 'Putt Putt Planet');
 define('ENGINESIS_SITE_ID', 110);
 define('ENGINESIS_SITE_DOMAIN', 'puttputtplanet.com');

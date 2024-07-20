@@ -322,6 +322,20 @@ function getHTTPHeader ($headerName) {
 }
 
 /**
+ * Set up correct HTTP response headers.
+ */
+function setHTTPHeader() {
+    if (headers_sent()) {
+        return;
+    }
+    $stage = serverStage();
+    $domains = "enginesis$stage.com *.enginesis$stage.com enginesis." . ENGINESIS_SITE_KEY . "$stage.com";
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    // header("Content-Security-Policy: default-src 'self' $domains; img-src *;");
+    header("Content-Security-Policy: *;");
+}
+
+/**
  * Determine the origin of the request.
  * @return string Request origin.
  */
@@ -736,14 +750,15 @@ function domainDropServer ($targetHost) {
 /**
  * Transform the host name into the matching stage-qualified host name requested. For example, if we are currently on
  * www.enginesis-q.com and the $targetStage is -l, return www.enginesis-l.com.
- * @param string $targetStage one of -l, -d, -x, -q or '' for live.
+ * @param string $targetStage one of -l, -d, -x, -q, or '' for live.
  * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
- * @return string The requalified host name.
+ * @return string The qualified host name.
  */
 function domainForTargetStage($targetStage, $hostName = null) {
     if (empty($hostName)) {
         $hostName = serverName();
     }
+    // find the tld
     $lastDot = strrpos($hostName, '.');
     if ($lastDot === false) {
         // no .tld!

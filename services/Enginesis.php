@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.8.4');
+    define('ENGINESIS_VERSION', '2.10.1');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -567,7 +567,7 @@ class Enginesis {
         }
         if (strpos($server, '.') === false) {
             // treat this instance as a localhost
-            $server = 'https://' . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN);
+            $server = 'https://' . $this->domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN);
         }
         return $server;
     }
@@ -623,7 +623,7 @@ class Enginesis {
     /**
      * Transform the host name into the matching stage-qualified host name requested. For example, if we are currently on
      * www.enginesis-q.com and the $targetStage is -l, return www.enginesis-l.com.
-     * @param string $targetStage one of -l, -d, -x, -q or '' for live.
+     * @param string $targetStage one of -l, -d, -x, -q, or '' for live.
      * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
      * @return string The qualified host name.
      */

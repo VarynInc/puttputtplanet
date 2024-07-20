@@ -14,7 +14,7 @@
     "use strict";
 
     const enginesis = {
-        VERSION: "2.11.2",
+        VERSION: "2.11.3",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -4108,7 +4108,7 @@
     // Conference services
     // ===========================================================================================================
     conferenceAssetRootPath: function(conferenceId) {
-        return "//" + enginesis.serverHost + "/sites/" + enginesis.siteId + "/conf/" + conferenceId + "/";
+        return "https://" + enginesis.serverHost + "/sites/" + enginesis.siteId + "/conf/" + conferenceId + "/";
     },
 
     conferenceGet: function(conferenceId, overRideCallBackFunction) {

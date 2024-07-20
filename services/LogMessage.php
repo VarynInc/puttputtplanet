@@ -90,10 +90,10 @@ class LogMessage
      * @return string
      */
     private static function _defaultFilePrefix () {
-        if ( ! defined('LOGFILE_PREFIX')) {
-            define('LOGFILE_PREFIX', 'enginesis');
+        if ( ! defined('ENGINESIS_SITE_KEY')) {
+            define('ENGINESIS_SITE_KEY', 'enginesis');
         }
-        return LOGFILE_PREFIX;
+        return ENGINESIS_SITE_KEY;
     }
 
     /**
