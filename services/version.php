@@ -2,7 +2,7 @@
  * and lock the system if under maintenance.
  */
 if ( ! defined('PUTTPUTTPLANET_VERSION')) {
-    define('PUTTPUTTPLANET_VERSION', "1.0.6");
+    define('PUTTPUTTPLANET_VERSION', "1.0.7");
 }
 define('PUTTPUTTPLANET_ADMIN_LOCK', false);
 define('ADMIN_LOCK_MESSAGE', '<h1>Putt Putt Planet is OFFLINE</h1><p>The Putt Putt Planet service is currently OFFLINE, most probably due to server maintenance.<br/>If you have an immediate need to change something please contact Putt Putt Planet support <a href="mailto:support@puttputtplanet.com">support@puttputtplanet.com</a>.</p>');
