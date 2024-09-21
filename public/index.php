@@ -5,13 +5,11 @@ require_once '../services/common.php';
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="x-ua-compatible" content="ie=edge">
     <title>Putt Putt Planet</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <link rel="manifest" href="site.webmanifest">
     <link rel="icon" type="image/png" href="icon-32.png">
     <link rel="apple-touch-icon" href="icon.png">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <META NAME="Description" CONTENT="Putt Putt Planet is the mini golf destination on the internet">
     <META NAME="Keywords" CONTENT="mini golf minigolf free online games enginesis varyn download PC internet web development entertainment">
     <META NAME="Author" content="Varyn, Inc.">
