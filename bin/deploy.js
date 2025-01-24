@@ -134,7 +134,7 @@ function mergeArgs(args, configuration) {
     if (args.hasOwnProperty('dryrun')) {
         configuration.isDryRun = args.dryrun;
     }
-    immediateLog(chalk.blue("isDryRun is " + (configuration.isDryRun ? "true" : "false")), false);
+    immediateLog(chalk.yellow("isDryRun is " + (configuration.isDryRun ? "true" : "false")), false);
     return configuration;
 }
 
@@ -341,12 +341,13 @@ function deploy(configuration) {
     }
 
     rsync.execute(function(error, exitCode, cmd) {
+        const timeNow = (new Date).toISOString();
         if (error) {
-            immediateLog("Site deploy fails for " + site + " " + error.toString());
+            immediateLog("Site deploy fails for " + site + " " + error.toString() + " at " + timeNow);
         } else if (isDryRun) {
-            immediateLog("Site dry run for " + site + " complete.");
+            immediateLog("Site dry run for " + site + " complete at "  + timeNow);
         } else {
-            immediateLog("Site deploy for " + site + " complete.");
+            immediateLog("Site deploy for " + site + " complete at "  + timeNow);
         }
     }, function (output) {
         // stdout
