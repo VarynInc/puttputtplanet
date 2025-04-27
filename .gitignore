@@ -10,6 +10,9 @@
 ehthumbs.db
 Thumbs.db
 
+# Some things in sitedev are not under version control
+sitedev/art
+
 # Other files and folders
 .idea/
 .vscode/
