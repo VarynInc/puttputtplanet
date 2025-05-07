@@ -188,11 +188,40 @@ function appendQueryParameter($url, $key, $value) {
     return $updatedURL;
 }
 
+/**
+ * Append all query parameters on to the end of a URL string. This helper function handles
+ * the edge cases.
+ * @param string The initial URL. Can be null or empty string.
+ * @param string|object Either a query string (k=v&k=v) or an key/value object.
+ * @return string A URL with updated query string.
+ */
+function appendQueryParameters($url, $keyValues) {
+    if (is_object($keyValues)) {
+        $parameters = $keyValues;
+    } elseif (is_string($keyValues)) {
+        parse_str($keyValues, $parameters);
+    }
+    $updatedURL = $url;
+    foreach($parameters as $key => $value) {
+        $updatedURL = appendQueryParameter($updatedURL, $key, $value);
+    }
+    return $updatedURL;
+}
+
+/**
+ * Turn a key/value array into a query string with each parameter URL encoded.
+ * For example it will return a=1&b=2 for the array ['a' => 1, 'b' => 2]
+ * @param Array $parameters A key/value array of parameters.
+ * @return String A URL query parameter string (without the leading '?')
+ */
 function encodeURLParams ($parameters) {
     $encodedURLParams = '';
     foreach ($parameters as $key => $value) {
         if ($encodedURLParams != '') {
             $encodedURLParams .= '&';
+        }
+        if ($value == null) {
+            $value = '';
         }
         $encodedURLParams .= urlencode($key) . '=' . urlencode($value);
     }
@@ -1083,14 +1112,23 @@ function copyArrayKey($source, & $target, $key, $force = false) {
 }
 
 /**
- * Determine is a variable is considered empty. This goes beyond PHP empty() function to support Flash and JavaScript
+ * Determine if a variable is considered empty. This goes beyond PHP empty() function to support SQL and JavaScript
  * possibilities.
- * @param $str
- * @return bool
+ *
+ * @param any $value A variable to test for emptiness.
+ * @return boolean True if considered empty, false if considered not empty.
  */
-function isEmpty ($str) {
-    if (isset($str)) {
-        return (is_null($str) || strlen($str) == 0 || $str == 'undefined' || strtolower($str) == 'null');
+function isEmpty ($value) {
+    if (isset($value)) {
+        if (is_numeric($value)) {
+            return $value == 0;
+        } elseif (is_string($value)) {
+            return (strlen($value) == 0 || $value == 'undefined' || strtolower($value) == 'null');
+        } elseif (is_array($value)) {
+            return count($value) == 0;
+        } else {
+            return is_null($value);
+        }
     } else {
         return true;
     }
@@ -1227,13 +1265,13 @@ function boolToString($variable) {
 
 /**
  * Convert a value to its boolean representation.
- * @param $variable - any type will be coerced to a boolean value.
+ * @param any $variable - any type will be coerced to a boolean value.
  * @return boolean
  */
 function valueToBoolean($variable) {
     if (is_string($variable)) {
         $variable = strtoupper($variable);
-        $result =  $variable == '1' || $variable == 'Y' || $variable == 'T' || $variable == 'YES' || $variable == 'TRUE' || $variable == 'CHECKED';
+        $result =  $variable == '1' || $variable == 'Y' || $variable == 'T' || $variable == 'YES' || $variable == 'TRUE' || $variable == 'CHECKED' || $variable == 'ON';
     } elseif (is_numeric($variable)) {
         $result = ! ! $variable;
     } else {
@@ -1333,14 +1371,16 @@ function cleanUserName ($userName) {
 }
 
 /**
- * Performs basic user password validation. The password can be any printable characters between 4 and 20 in length
+ * Performs basic user password validation. The password can be any printable characters between 8 and 20 in length
  * with no leading or trailing spaces.
  * @param string $password The password to check.
  * @return bool true if acceptable otherwise false.
  */
 function isValidPassword ($password) {
+    $minPasswordLength = 8;
+    $maxPasswordLength = 20;
     $len = strlen(trim($password));
-    return $len == strlen($password) && ctype_graph($password) && $len > 3 && $len < 21;
+    return $len == strlen($password) && ctype_graph($password) && $len >= $minPasswordLength && $len <= $maxPasswordLength;
 }
 
 /**
@@ -1348,7 +1388,7 @@ function isValidPassword ($password) {
  * certain we have a value our system can deal with.
  * @param $gender {string} a proposed value for gender, either a single character M, F, or N, or a word Male, Female, or Neutral.
  * @return string One of the gender setting we will accept.
- * TODO: This should be localized, so move the possible names table into a lookup table.
+ * @todo: This should be localized, so move the possible names table into a lookup table.
  */
 function validateGender ($gender) {
     $validGenders = array('Male', 'Female', 'Neutral');
@@ -1406,7 +1446,7 @@ function cleanString ($input) {
  * @return string The source string cleaned of all bad characters.
  */
 function fullyCleanString($source) {
-    return htmlspecialchars(cleanString($source));
+    return htmlspecialchars(strip_tags(cleanString($source)));
 }
 
 /**
@@ -1795,16 +1835,27 @@ function makeRandomToken ($length = 12) {
 }
 
 /**
+ * Append a URL parameter if the value is not empty.
+ *
+ * @param string The URL string to update. This string updated if the value is not empty.
+ * @param string A key.
+ * @param string The value to assign to the key.
+ * @return string the update URL string.
+ */
+function appendParamIfNotEmpty( & $params, $key, $value) {
+    if ( ! empty($key) && ! empty($value)) {
+        $params .= '&' . $key . '=' . $value;
+    }
+    return $params;
+}
+
+/**
  * If the flag parameter is determined to be true (implicit cast to bool) then return a checkbox string.
- * @param $flag
- * @return string
+ * @param boolean True for checked, false for not checked.
+ * @return string Checked or empty.
  */
 function showBooleanChecked($flag) {
-    if ($flag) {
-        return ' checked';
-    } else {
-        return '';
-    }
+    return $flag ? 'checked' : '';
 }
 
 function debugLog($message) {

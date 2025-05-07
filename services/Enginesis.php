@@ -6,7 +6,7 @@
  */
 
 if ( ! defined('ENGINESIS_VERSION')) {
-    define('ENGINESIS_VERSION', '2.10.1');
+    define('ENGINESIS_VERSION', '2.12.1');
 }
 require_once('EnginesisErrors.php');
 if ( ! defined('SESSION_COOKIE')) {
@@ -26,6 +26,7 @@ abstract class EnginesisNetworks {
     const Google = 7;
     const Twitter = 11;
     const Apple = 14;
+    const bsky = 15;
 }
 
 abstract class EnginesisRefreshStatus {
@@ -187,7 +188,7 @@ class Enginesis {
     function valueToBoolean($variable) {
         if (is_string($variable)) {
             $variable = strtoupper($variable);
-            $result =  $variable == '1' || $variable == 'Y' || $variable == 'T' || $variable == 'YES' || $variable == 'TRUE' || $variable == 'CHECKED';
+            $result =  $variable == '1' || $variable == 'Y' || $variable == 'T' || $variable == 'YES' || $variable == 'TRUE' || $variable == 'CHECKED' || $variable == 'ON';
         } elseif (is_numeric($variable)) {
             $result = ! ! $variable;
         } else {
@@ -233,24 +234,30 @@ class Enginesis {
     }
 
     /**
-     * Determine if a user name passes basic validity checks.
+     * Determine if a user name passes basic validity checks. User name rules:
+     * - at least 3 characters long, and no longer than 50.
+     * - no leading or trailing spaces.
+     * - may only contain letters, numbers, and the special symbols _@!~$.-|'
      *
-     * @param string $userName
-     * @return boolean
+     * @param string A user name to check.
+     * @return boolean true if OK, false if name is unacceptable.
      */
     public function isValidUserName ($userName) {
+        if (empty($userName)) {
+            return false;
+        }
         $badNames = ['null', 'undefined', 'xxx', 'shit', 'fuck', 'dick'];
-        return strlen(trim($userName)) > 2 && ! in_array($userName, $badNames);
+        return (strlen(trim($userName)) == strlen($userName)) && (preg_match('/^[a-zA-Z0-9_@!~\$\.\-\|\' ]{3,50}$/', $userName) == 1) && ( ! in_array($userName, $badNames));
     }
 
     /**
      * Determine if a password passes basic validity checks.
      *
-     * @param $password
-     * @return boolean
+     * @param string A password to check.
+     * @return boolean True if OK, false if unacceptable.
      */
     public function isValidPassword ($password) {
-        return strlen(trim($password)) > 3;
+        return ! empty($password) && strlen($password) > 12;
     }
 
     /**
@@ -789,7 +796,7 @@ class Enginesis {
      * If the API call returned an error this function sets the lastError object. If there was no error then
      * lastError is null. Call $enginesis->getLastError() to work with the error information.
      *
-     * @param object $enginesisResponse A response object from an Enginesis API call.
+     * @param object A response object from an Enginesis API call.
      * @return null|Array Returns null if an error occurred, an array of result "rows" if succeeded. If no results, then it usually is an empty array.
      */
     private function setLastErrorFromResponse ($enginesisResponse) {
@@ -799,11 +806,7 @@ class Enginesis {
             $statusMessage = '';
             $extendedInfo = '';
             $results = $this->getResponseStatus($enginesisResponse, $success, $statusMessage, $extendedInfo);
-            if ($results === null) {
-                $this->m_lastError = ['success' => $success, 'message' => $statusMessage, 'extended_info' => $extendedInfo];
-            } else {
-                $this->m_lastError = Enginesis::noError();
-            }
+            $this->m_lastError = ['success' => $success, 'message' => $statusMessage, 'extended_info' => $extendedInfo];
         } else {
             $this->m_lastError = ['success' => '0', 'message' => EnginesisErrors::SERVER_RESPONSE_NOT_VALID, 'extended_info' => 'The request did not complete due to an internal error.'];
         }
@@ -898,7 +901,15 @@ class Enginesis {
         // PHP timestamps are in seconds, JavaScript timestamps are in milliseconds. :(
         $timestampJS = $timestamp * 1000;
         $refreshTokenJSON = '{"refresh_token":"'. $refreshToken . '","timestamp":"' . $timestampJS . '"}';
-        setcookie(REFRESH_COOKIE, $refreshTokenJSON, $timestamp + (365 * 24 * 60 * 60), '/', $this->sessionCookieDomain(), true, false);
+        $cookieOptions = [
+            'expires' => $timestamp + (365 * 24 * 60 * 60),
+            'path' => '/',
+            'domain' => $this->sessionCookieDomain(),
+            'secure' => true,
+            'httponly' => false,
+            'samesite' => 'Strict'
+        ];
+        setcookie(REFRESH_COOKIE, $refreshTokenJSON, $cookieOptions);
         return $this->m_refreshToken;
     }
 
@@ -1027,7 +1038,7 @@ class Enginesis {
      * Generate a time stamp for the current time rounded to the nearest SESSION_DAYSTAMP_HOURS hour.
      * @return int
      */
-    private function sessionDayStamp() {
+    public function sessionDayStamp() {
         return floor(time() / (SESSION_DAYSTAMP_HOURS * 60 * 60)); // good for SESSION_DAYSTAMP_HOURS hours
     }
 
@@ -1050,6 +1061,62 @@ class Enginesis {
      */
     private function sessionMakeId() {
         return md5($this->m_developerKey . '' . $this->sessionDayStamp() . '' . $this->m_userId . '' . $this->m_gameId);
+    }
+
+    /**
+     * Create a session hash that serves as a one-way hash to uniquely identify a session between the client and the server. It can be
+     * used to check if any session data was tampered with, or as a unique key. At least one of user-id, game-id, or site-mark must be
+     * provided and the combination must be unique across all users of the site on this day.
+     * - If $user_id is 0, then $site_make must be provided as a unique value to identify this session. Use something like a GUID or
+     * a random number with enough entropy across all clients.
+     * - Use $game_id to identify a game session, or 0 if not a game session.
+     * - Note that if the user changes their name or access level during the session then the session id must be regenerated.
+     * @param integer $site_id must be a valid site-id
+     * @param integer $user_id valid user-id on site-id, or 0 if creating an anonymous session
+     * @param integer $game_id valid game-id on site-id, or 0 if creating a site-wide session not associated with a game play session.
+     * @param string $user_name user name associated to user-id, would make the session invalid if the user changes their name.
+     * @param string $site_user_id if this user came from a SSO authentication then that site's unique id, otherwise an empty string.
+     * @param integer $network_id if this user came from a SSO authentication then that site's unique id, otherwise an empty string.
+     * @param integer $access_level the user's level of access for this session
+     * @param string $site_mark a value with enough entropy (e.g. a GUID or a large random number) to make this session unique when user-id and user-name are not provided (for example, an anonymous user playing a game.)
+     * @param integer $day_stamp the Enginesis day-stamp to limit the valid time of the session
+     * @return string session user game hash. Returns empty string if the session is not valid.
+     */
+    public function sessionMakeHash ($site_id, $user_id, $game_id, $user_name, $site_user_id, $network_id, $access_level, $site_mark, $day_stamp) {
+        if (isEmpty($day_stamp)) {
+            $day_stamp = $this->sessionDayStamp();
+        }
+        $site_key = $this->m_developerKey;
+        $hashClear = "s=$site_id&u=$user_id&d=$day_stamp&n=$user_name&g=$game_id&i=$site_user_id&w=$network_id&l=$access_level&m=$site_mark&k=$site_key";
+        return md5($hashClear);
+    }
+    // @TODO: debugging only, remove ASAP
+    public function sessionMakeHashClear ($site_id, $user_id, $game_id, $user_name, $site_user_id, $network_id, $access_level, $site_mark, $day_stamp) {
+        if (isEmpty($day_stamp)) {
+            $day_stamp = $this->sessionDayStamp();
+        }
+        $site_key = $this->m_developerKey;
+        $hashClear = "s=$site_id&u=$user_id&d=$day_stamp&n=$user_name&g=$game_id&i=$site_user_id&w=$network_id&l=$access_level&m=$site_mark&k=$site_key";
+        return $hashClear;
+    }
+
+    /**
+     * Anytime we look at the game session cookie we should validate the hash in case someone tampered the cookie.
+     * Compliment to `sessionMakeHash`.
+     * @param string $cr Session hash that was previously generated with `sessionMakeHash()`.
+     * @param integer $site_id must be a valid site-id
+     * @param integer $user_id valid user-id on site-id, or 0 if creating an anonymous session
+     * @param integer $game_id valid game-id on site-id, or 0 if creating a site-wide session
+     * @param string $user_name user name associated to user-id, would make the session invalid if the user changes their name.
+     * @param string $site_user_id if this user came from a SSO authentication then that site's unique id, otherwise an empty string.
+     * @param integer $network_id Network id associated with co-reg/SSO user-id.
+     * @param integer $access_level the user's level of access for this session
+     * @param string $site_mark a value with enough entropy (e.g. a GUID or a large random number) to make this session unique when user-id and user-name are not provided (for example, an anonymous user playing a game.)
+     * @param integer $day_stamp the Enginesis day-stamp to limit the valid time of the session
+     * @return boolean true if the hash matches, false if it does not.
+     */
+    public function sessionVerifyHash ($cr, $site_id, $user_id, $game_id, $user_name, $site_user_id, $network_id, $access_level, $site_mark, $day_stamp) {
+        return $cr == $this->sessionMakeHash($site_id, $user_id, $game_id, $user_name, $site_user_id, $network_id, $access_level, $site_mark, $day_stamp);
     }
 
     /**
@@ -1092,12 +1159,12 @@ class Enginesis {
 
     /**
      * Save the authenticated session to cookie so we can retrieve it next time this user returns.
-     * @param string $authenticationToken the encrypted authentication token generated by sessionMakeAuthenticationTokenEncrypted.
-     * @param integer $user_id associated with $authenticationToken.
-     * @param string $user_name associated with $authenticationToken.
-     * @param string $site_user_id associated with $authenticationToken.
-     * @param integer $network_id associated with $authenticationToken.
-     * @param integer $access_level associated with $authenticationToken.
+     * @param string the encrypted authentication token generated by sessionMakeAuthenticationTokenEncrypted.
+     * @param integer associated with $authenticationToken.
+     * @param string associated with $authenticationToken.
+     * @param string associated with $authenticationToken.
+     * @param integer associated with $authenticationToken.
+     * @param integer associated with $authenticationToken.
      * @return string An error code, '' if successful.
      */
     private function sessionSave ($authenticationToken, $user_id, $user_name, $site_user_id, $network_id, $access_level) {
@@ -1105,7 +1172,15 @@ class Enginesis {
         $errorLevel = error_reporting(); // turn off warnings so we don't generate crap in the output stream. If we don't do this fucking php writes an error and screws up the output stream. (I cant get the try/catch to work without it)
         error_reporting($errorLevel & ~E_WARNING);
         try {
-            if ( ! setcookie(SESSION_COOKIE, $authenticationToken, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $this->sessionCookieDomain(), true, false)) {
+            $cookieOptions = [
+                'expires' => time() + (SESSION_DAYSTAMP_HOURS * 60 * 60),
+                'path' => '/',
+                'domain' => $this->sessionCookieDomain(),
+                'secure' => true,
+                'httponly' => false,
+                'samesite' => 'Strict'
+            ];
+            if ( ! setcookie(SESSION_COOKIE, $authenticationToken, $cookieOptions)) {
                 $rc = 'CANNOT_SET_SESSION';
                 $this->setLastError($rc, 'sessionSave setcookie failed');
                 $this->debugInfo("Failed to save the engsession cookie", __FILE__, __LINE__);
@@ -1135,7 +1210,7 @@ class Enginesis {
      * Save the authenticated user info to cookie so we can retrieve it next time this user returns. We do this
      * to allow clients to access the logged in user info easily after a login. Always verify the token is
      * valid before relying on this data.
-     * @param $userInfo
+     * @param object user properties returned from backend call like UserGet.
      * @return string An error code, '' if successful.
      */
     private function sessionUserInfoSave ($userInfo) {
@@ -1145,7 +1220,15 @@ class Enginesis {
         error_reporting($errorLevel & ~E_WARNING);
         try {
             $userInfoJSON = json_encode($userInfo);
-            if (setcookie(SESSION_USERINFO, $userInfoJSON, time() + (SESSION_DAYSTAMP_HOURS * 60 * 60), '/', $this->sessionCookieDomain(), true, false) === false) {
+            $cookieOptions = [
+                'expires' => time() + (SESSION_DAYSTAMP_HOURS * 60 * 60),
+                'path' => '/',
+                'domain' => $this->sessionCookieDomain(),
+                'secure' => true,
+                'httponly' => false,
+                'samesite' => 'Strict'
+            ];
+            if (setcookie(SESSION_USERINFO, $userInfoJSON, $cookieOptions) === false) {
                 $rc = 'CANNOT_SAVE_USERINFO';
                 $this->setLastError($rc, 'sessionUserInfoSave setcookie failed');
             }
@@ -1171,8 +1254,24 @@ class Enginesis {
         if (isset($_COOKIE[SESSION_USERINFO])) {
             try {
                 $userInfo = json_decode($_COOKIE[SESSION_USERINFO]);
-                // @todo: Validate this user data make sure it was not tampered, check if expired.
                 $this->debugInfo("decoded cookie for SESSION_USERINFO " . json_encode($userInfo), __FILE__, __LINE__);
+                // Validate this user data make sure it was not tampered, check if expired.
+                $isValid = $this->sessionVerifyHash(
+                    $userInfo->cr,
+                    $userInfo->site_id,
+                    $userInfo->user_id,
+                    0,
+                    $userInfo->user_name,
+                    $userInfo->site_user_id,
+                    $userInfo->network_id,
+                    $userInfo->access_level,
+                    0,
+                    0
+                );
+                if ( ! $isValid) {
+                    $userInfo = null;
+                    $this->sessionClear();
+                }
             } catch (Exception $e) {
                 $this->setLastError('CANNOT_GET_USERINFO', 'sessionUserInfoGet could not get cookie: ' . $e->getMessage());
                 $this->debugInfo('sessionUserInfoGet fails: ' . json_encode($this->m_lastError), __FILE__, __LINE__);
@@ -1205,10 +1304,29 @@ class Enginesis {
                         $userInfo->access_level = $userData['accesslevel'];
                     }
                 }
-                $this->sessionSave($userInfo->authtok, $userInfo->user_id, $userInfo->user_name, $userInfo->site_user_id, $userInfo->network_id, $userInfo->access_level, $userInfo->network_id);
-                $this->sessionUserInfoSave($userInfo);
-                $this->m_refreshedUserInfo = $userInfo;
-                $this->debugInfo("Restored m_refreshedUserInfo from sessionRestoreFromResponse " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
+                $dayStamp = $this->sessionDayStamp();
+                $isValidHash = $this->sessionVerifyHash(
+                    $userInfo->cr,
+                    $userInfo->site_id,
+                    $userInfo->user_id,
+                    0,
+                    $userInfo->user_name,
+                    $userInfo->site_user_id,
+                    $userInfo->network_id,
+                    $userInfo->access_level,
+                    0,
+                    $dayStamp
+                );
+                if ($isValidHash) {
+                    $this->sessionSave($userInfo->authtok, $userInfo->user_id, $userInfo->user_name, $userInfo->site_user_id, $userInfo->network_id, $userInfo->access_level, $userInfo->network_id);
+                    $this->sessionUserInfoSave($userInfo);
+                    $this->m_refreshedUserInfo = $userInfo;
+                    $this->debugInfo("Restored m_refreshedUserInfo from sessionRestoreFromResponse " . json_encode($this->m_refreshedUserInfo), __FILE__, __LINE__);
+                } else {
+                    $this->debugInfo("sessionRestoreFromResponse detected possible compromise in session data " . json_encode($userInfo), __FILE__, __LINE__);
+                    $userInfo = null;
+                    $this->sessionClear();
+                }
             }
         }
         if ($userInfo === null) {
@@ -1251,7 +1369,6 @@ class Enginesis {
      */
     private function sessionClear () {
         $rc = '';
-        $sessionExpireTime = SESSION_EXPIRE_SECONDS;
         $this->m_authToken = null;
         $this->m_authTokenWasValidated = false;
         $this->m_userName = '';
@@ -1262,10 +1379,10 @@ class Enginesis {
         $this->m_isLoggedIn = false;
         $this->m_refreshedUserInfo = null;
         if ( ! headers_sent()) {
-            if (setcookie(SESSION_COOKIE, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain(), true, false) === false) {
+            if (setcookie(SESSION_COOKIE, '', 1, '/', $this->sessionCookieDomain(), true, false) === false) {
                 $rc = 'CANNOT_SET_SESSION';
             }
-            setcookie(SESSION_USERINFO, '', time() - $sessionExpireTime, '/', $this->sessionCookieDomain(), true, false);
+            setcookie(SESSION_USERINFO, '', 1, '/', $this->sessionCookieDomain(), true, false);
         }
         $_COOKIE[SESSION_COOKIE] = null;
         $_COOKIE[SESSION_USERINFO] = null;
@@ -1446,15 +1563,19 @@ class Enginesis {
     }
 
     /**
-     * Encode a key/value array into URL parameters. `key=value&key=value&...`.
-     * @param array $data A key/value array.
-     * @return string a URL parameter query string.
+     * Turn a key/value array into a query string with each parameter URL encoded.
+     * For example it will return a=1&b=2 for the array ['a' => 1, 'b' => 2]
+     * @param Array $parameters A key/value array of parameters.
+     * @return String A URL query parameter string (without the leading '?')
      */
-    public function encodeURLParams ($data) {
+    function encodeURLParams ($parameters) {
         $encodedURLParams = '';
-        foreach ($data as $key => $value) {
+        foreach ($parameters as $key => $value) {
             if ($encodedURLParams != '') {
                 $encodedURLParams .= '&';
+            }
+            if ($value == null) {
+                $value = '';
             }
             $encodedURLParams .= urlencode($key) . '=' . urlencode($value);
         }
@@ -1667,7 +1788,7 @@ class Enginesis {
         if (! isset($lastErrorCode) || $lastErrorCode === null) {
             $lastErrorCode = $this->m_lastError;
         }
-        return $lastErrorCode != null && $this->m_lastError['message'] != EnginesisErrors::NO_ERROR;
+        return $lastErrorCode != null && $lastErrorCode['success'] == 0 && $lastErrorCode['message'] != EnginesisErrors::NO_ERROR;
     }
 
     /**
@@ -1982,10 +2103,10 @@ class Enginesis {
     /**
      * For Co-registration/SSO, we take information provided by the hosting network and either setup a new user or update
      * an existing user. The unique key is $site_user_id and that plus one of $real_name or $user_name are required.
-     * @param $parameters {object} array of key values of user information. Keys site_user_id, network_id, and one
+     * @param object array of key values of user information. Keys site_user_id, network_id, and one
      *   of real_name or user_name are required. email_address, dob, gender, scope, avatar_url, id_token are optional.
-     * @param $saveSession {boolean} true to save this session for next page refresh.
-     * @return {object} an $userInfo object. Same result as UserLogin.
+     * @param boolean true to save this session for next page refresh.
+     * @return object a $userInfo object. Same result as UserLogin.
      */
     public function userLoginCoreg ($coregParameters, $saveSession) {
         $service = 'UserLoginCoreg';
@@ -1993,12 +2114,12 @@ class Enginesis {
         // Convert parameters or use logical defaults
         $parameters = [
             'site_user_id' => $coregParameters['site_user_id'],
+            'network_id' => $coregParameters['network_id'],
             'user_name' => isset($coregParameters['user_name']) ? $coregParameters['user_name'] : '',
             'real_name' => isset($coregParameters['real_name']) ? $coregParameters['real_name'] : '',
             'email_address' => isset($coregParameters['email_address']) ? $coregParameters['email_address'] : '',
             'gender' => isset($coregParameters['gender']) ? $coregParameters['gender'] : 'U',
             'dob' => isset($coregParameters['dob']) ? $coregParameters['dob'] : '',
-            'network_id' => $coregParameters['network_id'],
             'scope' => isset($coregParameters['scope']) ? $coregParameters['scope'] : '',
             'agreement' => isset($coregParameters['agreement']) ? $coregParameters['agreement'] : '0',
             'avatar_url' => isset($coregParameters['avatar_url']) ? $coregParameters['avatar_url'] : '',
@@ -2035,7 +2156,7 @@ class Enginesis {
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         $this->m_refreshToken = null;
-        setcookie(REFRESH_COOKIE, '', time() - SESSION_EXPIRE_SECONDS, '/', $this->sessionCookieDomain(), true, false);
+        setcookie(REFRESH_COOKIE, '', 1, '/', $this->sessionCookieDomain(), true, false);
         $this->sessionClear();
         return $results != null;
     }
@@ -2122,54 +2243,56 @@ class Enginesis {
     }
 
     /**
-     * Register a new user by calling the Enginesis function and wait for the response. We must convert and field data
+     * Register a new user by calling the Enginesis function and wait for the response. We must convert any field data
      * from our version to the Enginesis version since we have multiple different ways to collect it.
      *
-     * @param $userInfo {array} key/value object of registration data.
-     * @return object: null if registration fails, otherwise returns the user info object and logs the user in.
+     * @param array key/value object of registration data.
+     * @return object|null null if registration fails, otherwise returns the user info object and logs the user in.
      */
     public function userRegistration ($userInfo) {
         $service = 'RegisteredUserCreate';
         // @todo: user_name, email_address, password are required. We can send it up to the server and wait for a response but we could save time and do it here.
         $parameters = [
             'user_name' => $userInfo['user_name'],
-            'password' => $userInfo['password'],
-            'security_question_id' => $this->arrayValueOrDefault($userInfo, 'security_question_id', '3'),
-            'security_answer' => $this->arrayValueOrDefault($userInfo, 'security_answer', ''),
-            'email_address' => $userInfo['email_address'],
-            'dob' => $userInfo['dob'],
             'real_name' => $this->arrayValueOrDefault($userInfo, 'real_name', $userInfo['user_name']),
+            'dob' => $userInfo['dob'],
+            'gender' => $this->arrayValueOrDefault($userInfo, 'gender', 'U'),
+            'email_address' => $userInfo['email_address'],
             'city' => $this->arrayValueOrDefault($userInfo, 'city', ''),
             'state' => $this->arrayValueOrDefault($userInfo, 'state', ''),
             'zipcode' => $this->arrayValueOrDefault($userInfo, 'zipcode', ''),
             'country_code' => $this->arrayValueOrDefault($userInfo, 'country_code', 'US'),
-            'tagline' => $this->arrayValueOrDefault($userInfo, 'tagline', ''),
-            'gender' => $this->arrayValueOrDefault($userInfo, 'gender', 'U'),
             'mobile_number' => $this->arrayValueOrDefault($userInfo, 'mobile_number', ''),
             'im_id' => $this->arrayValueOrDefault($userInfo, 'im_id', ''),
             'img_url' => $this->arrayValueOrDefault($userInfo, 'img_url', ''),
             'about_me' => $this->arrayValueOrDefault($userInfo, 'about_me', ''),
+            'tagline' => $this->arrayValueOrDefault($userInfo, 'tagline', ''),
             'additional_info' => $this->arrayValueOrDefault($userInfo, 'additional_info', ''),
-            'agreement' => '1',
-            'captcha_id' => '99999',
-            'captcha_response' => 'DEADMAN',
             'site_user_id' => '',
             'network_id' => '1',
-            'source_site_id' => $this->m_siteId
+            'agreement' => '1',
+            'password' => $userInfo['password'],
+            'security_question_id' => $this->arrayValueOrDefault($userInfo, 'security_question_id', '1'),
+            'security_answer' => $this->arrayValueOrDefault($userInfo, 'security_answer', 'yes'),
+            'source_site_id' => $this->m_siteId,
+            'captcha_id' => '99999',
+            'captcha_response' => 'DEADMAN'
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         $results = $this->setLastErrorFromResponse($enginesisResponse);
         if (is_array($results) && count($results) > 0) {
+            // @todo: Server sends the user an email with user_id+secondary_password to complete/confirm registration. If this site auto-confirms user registration,
+            // then we should log the user in automatically now. We know this because the server gives us authtok when we are to do this.
             $userInfoResult = $results[0];
-            $cr = $userInfoResult->cr;
-            // @todo: Verify hash to make sure payload was not tampered
-            $user_id = $userInfoResult->user_id;
-            $secondary_password = $userInfoResult->secondary_password;
-            // @todo: If this site auto-confirms user registration then we should log the user in automatically now.
-            // We know this because the server gives us the token when we are to do this.
-            if (isset($userInfoResult->authtok)) {
+            if (isset($userInfoResult->cr) && isset($userInfoResult->authtok)) {
+                // user is automatically logged in
+                $cr = $userInfoResult->cr;
+                // @todo: Verify hash to make sure payload was not tampered
                 $this->sessionSave($userInfoResult->authtok, $userInfoResult->user_id, $userInfoResult->user_name, $userInfoResult->site_user_id, $userInfoResult->network_id, $userInfoResult->access_level, EnginesisNetworks::Enginesis);
                 $this->sessionUserInfoSave($userInfoResult);
+            } else {
+                $user_id = $userInfoResult->user_id;
+                $secondary_password = $userInfoResult->secondary_password;
             }
         } else {
             $userInfoResult = null;
@@ -2178,13 +2301,14 @@ class Enginesis {
     }
 
     /**
-     * Update and existing user's registration information.
-     * @param $parameters: key/value object of registration data. Only changed keys may be provided.
+     * Update an existing user's registration information.
+     * @param array key/value object of registration data. Only changed keys may be provided.
      * @return object: null if registration fails, otherwise returns the user info object.
      */
     public function registeredUserUpdate ($userInfo) {
         $service = 'RegisteredUserUpdate';
         $parameters = [
+            'user_id' => $userInfo['user_id'],
             'user_name' => $userInfo['user_name'],
             'email_address' => $userInfo['email_address'],
             'dob' => $userInfo['dob'],
@@ -2500,9 +2624,9 @@ class Enginesis {
 
     /**
      * When the user comes back to reset the password.
-     * @param $userId: int the user's internal user id.
-     * @param $newPassword: string the user's replacement password.
-     * @param $token: string the user's granted token allowing the reset from an authorized source.
+     * @param int the user's internal user id.
+     * @param string the user's replacement password.
+     * @param string the user's granted token allowing the reset from an authorized source.
      * @return object: null if reset fails, otherwise returns the user info object and logs the user in.
      */
     public function userVerifyForgotPassword ($userId, $newPassword, $token) {
@@ -2532,7 +2656,7 @@ class Enginesis {
 
     /**
      * The general public user get - returns a minimum set of public attributes about a user.
-     * @param $userId - may be either an int indicating a user_id or a string indicating a user_name.
+     * @param integer|string may be either an int indicating a user_id or a string indicating a user_name.
      * @return object A user info object containing only the public attributes.
      */
     public function userGet ($userId) {
@@ -2555,8 +2679,32 @@ class Enginesis {
     }
 
     /**
+     * Determine if an email address is assigned to an Enginesis account.
+     * @param string An email address to check.
+     * @return object A user id, if authorized to see it, or a 1 if the email is assigned or 0 if
+     * no account currently uses that email.
+     */
+    public function userGetByEmail ($email) {
+        $service = 'UserGetByEmail';
+        $user = null;
+        if ($this->isValidEmailAddress($email)) {
+            $parameters = ['email_address' => $email];
+            $enginesisResponse = $this->callServerAPI($service, $parameters);
+            $results = $this->setLastErrorFromResponse($enginesisResponse);
+            if (is_array($results) && count($results) > 0) {
+                $user = $results[0];
+            } else {
+                $user = ['user_exists' => $this->getLastErrorCode() != EnginesisErrors::USER_DOES_NOT_EXIST];
+            }
+            return $user;
+        } else {
+            return $this->makeErrorResponse(EnginesisErrors::INVALID_PARAMETER, 'Email address does not appear to be valid.', null);
+        }
+    }
+
+    /**
      * The general public user get by a user name - returns a minimum set of public attributes about a user.
-     * @param $userName - may be either an int indicating a user_id or a string indicating a user_name.
+     * @param string|integer $userName - may be either an int indicating a user_id or a string indicating a user_name.
      * @return object A user info object containing only the public attributes.
      */
     public function userGetByName ($userName) {

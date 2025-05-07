@@ -338,7 +338,7 @@ class LogMessage
             'log_to_file' => true,
             'log_file_path' => LogMessage::_defaultFileWritablePath(),
             'log_file_prefix' => LogMessage::_defaultFilePrefix(),
-            'log_to_url' => 'http://enginesis-l.com/procs/log.php',
+            'log_to_url' => 'https://enginesis-l.com/procs/log.php',
             'log_to_socket' => 8001,
             'stage' => serverStage()
         ];
