@@ -220,7 +220,7 @@ function encodeURLParams ($parameters) {
         if ($encodedURLParams != '') {
             $encodedURLParams .= '&';
         }
-        if ($value == null) {
+        if (is_null($value)) {
             $value = '';
         }
         $encodedURLParams .= urlencode($key) . '=' . urlencode($value);
