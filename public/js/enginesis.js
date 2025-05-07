@@ -14,7 +14,7 @@
     "use strict";
 
     const enginesis = {
-        VERSION: "2.11.3",
+        VERSION: "2.12.5",
         debugging: true,
         disabled: false, // use this flag to turn off communicating with the server
         isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -73,7 +73,8 @@
             Facebook:  2,
             Google:    7,
             Twitter:  11,
-            Apple:    14
+            Apple:    14,
+            bsky:     15
         }
     };
     let enginesisContext = null;
@@ -168,7 +169,7 @@
         } else if (numberOfArguments == 1) {
             result = arguments[0];
         } else {
-            for (var i = 0; i < numberOfArguments; i ++) {
+            for (let i = 0; i < numberOfArguments; i += 1) {
                 if ( ! isEmpty(arguments[i])) {
                     result = arguments[i];
                     break;
@@ -197,7 +198,7 @@
         } else if (numberOfArguments == 1) {
             result = arguments[0];
         } else {
-            for (var i = 0; i < numberOfArguments; i ++) {
+            for (let i = 0; i < numberOfArguments; i += 1) {
                 if ( ! isNull(arguments[i])) {
                     result = arguments[i];
                     break;
@@ -413,7 +414,7 @@
      */
     function preprocessEnginesisResult(enginesisResult) {
         return new Promise(function(resolve) {
-            var serviceEndPoint = enginesisResult.fn;
+            const serviceEndPoint = enginesisResult.fn;
             // Handle an expired token here, issue a SessionRefresh, and then re-issue the original request
             if (resultIsExpiredToken(enginesisResult)) {
                 refreshTokenAndReissueRequest(enginesisResult)
@@ -422,7 +423,7 @@
                 });
             } else if (resultIsSuccess(enginesisResult) && serviceEndPoint) {
                 // @todo: find a better place to define this dispatch table
-                var dispatchTable = {
+                const dispatchTable = {
                     SessionBegin: updateGameSessionInfo,
                     SessionRefresh: refreshSessionInfo,
                     UserLogin: updateLoggedInUserInfo,
@@ -434,7 +435,7 @@
                     UserFavoriteGamesUnassign: updateFavoriteGames,
                     UserFavoriteGamesUnassignList: updateFavoriteGames
                 };
-                var dispatchFunction = dispatchTable[serviceEndPoint];
+                const dispatchFunction = dispatchTable[serviceEndPoint];
                 if ( ! isNull(dispatchFunction)) {
                     dispatchFunction(enginesisResult);
                 }
@@ -503,6 +504,7 @@
         return utf8Encode.encode(inputString);
     }
 
+    /* eslint-disable */
     /**
     * Compute the MD5 checksum for the given string.
     * @param {string} s String/byte array to compute the checksum.
@@ -563,6 +565,7 @@
         i=B(Y)+B(X)+B(W)+B(V);
         return i.toLowerCase();
     }
+    /* eslint-enable */
 
     /**
      * This is the callback from a request to refresh the Enginesis login when the auth token
@@ -612,9 +615,9 @@
      * @param {object} enginesisResult Enginesis server response object
      */
     function updateFavoriteGames(enginesisResult) {
-        var serverFavoriteGamesList = enginesisResult.results.result;
+        const serverFavoriteGamesList = enginesisResult.results.result;
         enginesis.favoriteGames.clear();
-        for (var i = 0; i < serverFavoriteGamesList.length; i ++) {
+        for (let i = 0; i < serverFavoriteGamesList.length; i += 1) {
             enginesis.favoriteGames.add(parseInt(serverFavoriteGamesList[i].game_id, 10));
         }
     }
@@ -625,7 +628,7 @@
      * @returns {string} A new session expire time.
      */
     function newSessionExpireTime() {
-        return new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ');
+        return new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace("T", " ");
     }
 
     /**
@@ -724,20 +727,20 @@
      * @returns {Number} The session day stamp value.
      */
     function sessionDayStamp() {
-        var SESSION_DAYSTAMP_HOURS = 48;
+        const SESSION_DAYSTAMP_HOURS = 48;
         return Math.floor(Date.now() / (SESSION_DAYSTAMP_HOURS * 60 * 60 * 1000));
     }
 
     /**
      * Collect the user session information to make sure we represent the correct
      * user log in and session state.
-     * @param {Object} userInfo A userInfo object received from a log in, session begin, or restored from local storage.
+     * @param {Object} userUserInfo A userInfo object received from a log in, session begin, or restored from local storage.
      * @returns {Object} A userInfo object.
      */
     function coerceUserInfoFromUserInfo(userUserInfo) {
         const loggedInUserInfo = enginesis.loggedInUserInfo || {};
         const userInfo = userUserInfo || {};
-        let coercedUserInfo = {
+        const coercedUserInfo = {
             siteId: enginesis.siteId,
             userId: coerceNotNull(userInfo.userId, userInfo.user_id, loggedInUserInfo.user_id, 0),
             userName: coerceNotEmpty(userInfo.userName, userInfo.user_name, loggedInUserInfo.user_name, ""),
@@ -797,7 +800,7 @@
             isVerified = hashFromServer == sessionMakeHash(userInfoInternal);
             if (isVerified) {
                 // game session is good but the user must refresh their authentication
-                debugLog("sessionVerifyHash Session expired but we think we can refresh it.");
+                // debugLog("sessionVerifyHash Session expired but we think we can refresh it.");
                 enginesisContext.sessionRefresh(_getRefreshToken(), null)
                 .then(function(enginesisResult) {
                     debugLog("sessionVerifyHash users authentication has been refreshed. " + enginesisResult.toString());
@@ -845,14 +848,14 @@
      * @returns {integer} The number of entries removed. 0 if no matching entry.
      */
     function removeFromServiceQueue(stateSequenceNumber) {
-        var removed = 0;
-        var serviceQueue = enginesis.serviceQueue;
+        let serviceQueue = enginesis.serviceQueue;
+        let removed = 0;
         if (serviceQueue != null && serviceQueue.length > 0) {
             serviceQueue = serviceQueue.filter(function(item) {
-                var match = item.state_seq == stateSequenceNumber;
+                const match = item.state_seq == stateSequenceNumber;
                 if (match) {
                     item.state_status = 2;
-                    removed ++;
+                    removed += 1;
                 }
                 return ! match;
             });
@@ -882,7 +885,7 @@
      * @returns {boolean} True if there are items on the queue to be processed.
      */
     function restoreServiceQueue() {
-        var serviceQueue = loadObjectWithKey(enginesis.serviceQueueSaveKey);
+        let serviceQueue = loadObjectWithKey(enginesis.serviceQueueSaveKey);
         if (serviceQueue == null) {
             serviceQueue = [];
             enginesis.serviceQueueRestored = 0;
@@ -900,11 +903,9 @@
      * @returns {Array} A reference to the queue.
      */
     function resetServiceQueue() {
-        var serviceQueue = enginesis.serviceQueue;
-        var i;
-
+        const serviceQueue = enginesis.serviceQueue;
         if (serviceQueue != null && serviceQueue.length > 0) {
-            for (i = 0; i < serviceQueue.length; i ++) {
+            for (let i = 0; i < serviceQueue.length; i += 1) {
                 serviceQueue[i].state_status = 0;
             }
         }
@@ -918,7 +919,7 @@
      */
     function formatHTTPHeader(additionalHeaders) {
         // @todo: set "multipart/form" when sending files
-        var httpHeaders = Object.assign(
+        const httpHeaders = Object.assign(
             {
                 "Accept": "application/json",
                 "X-DeveloperKey": enginesis.developerKey
@@ -951,9 +952,10 @@
             method: "POST",
             headers: formatHTTPHeader(),
             body: new URLSearchParams(enginesisParameters)
-        }).then(async function(response) {
+        })
+        .then(async function(response) {
             if (response.status != 200) {
-                let errorMessage = "Service error " + response.status + " from " + enginesis.siteResources.serviceURL;
+                const errorMessage = "Service error " + response.status + " from " + enginesis.siteResources.serviceURL;
                 // @todo: we still need to determine if this is a server error or a network error
                 // if (setOffline()) {
                 //     errorMessage = "Enginesis network error encountered, assuming we're offline. " + enginesis.siteResources.serviceURL + " for " + serviceName + ": " + requestError.toString();
@@ -986,13 +988,11 @@
      * @returns {object} Item to be processed.
      */
     function getNextUnprocessedMessage() {
-        var serviceQueue = enginesis.serviceQueue;
-        var unprocessedRequest = null;
-        var enginesisRequest;
-        var i;
+        const serviceQueue = enginesis.serviceQueue;
+        let unprocessedRequest = null;
 
-        for (i = 0; i < serviceQueue.length; i ++) {
-            enginesisRequest = serviceQueue[i];
+        for (let i = 0; i < serviceQueue.length; i += 1) {
+            const enginesisRequest = serviceQueue[i];
             if (typeof enginesisRequest.state_status == "undefined" || enginesisRequest.state_status == 0) {
                 enginesisRequest.state_status = 1;
                 unprocessedRequest = enginesisRequest;
@@ -1031,12 +1031,12 @@
                     .then(function (response) {
                         removeFromServiceQueue(enginesisParameters.state_seq);
                         if (response.status == 200) {
-                            response.json().then(function (enginesisResult) {
+                            response.json()
+                            .then(function (enginesisResult) {
                                 let errorMessage;
                                 if (enginesisResult == null) {
                                     // If Enginesis fails to return a valid object then the service must have failed, possible the response was not parsable JSON (e.g. error 500)
-                                    var serverResponse = response.text();
-                                    debugLog("Enginesis service error for " + serviceName + ": " + serverResponse);
+                                    debugLog("Enginesis service error for " + serviceName + ": " + response.text());
                                     errorMessage = "Enginesis service while contacting Enginesis at " + enginesis.serverHost + " for " + serviceName;
                                     enginesisResult = forceErrorResponseObject(serviceName, enginesisParameters.state_seq, "SERVICE_ERROR", errorMessage, enginesisParameters);
                                 } else {
@@ -1057,9 +1057,7 @@
                             callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
                         }
                     }, function (error) {
-
                         // @todo: If the error is no network, then set offline and queue this request
-
                         if (setOffline()) {
                             errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
                         } else {
@@ -1074,9 +1072,7 @@
                         );
                     })
                     .catch(function (error) {
-
                         // @todo: If the error is no network, then set offline and queue this request
-
                         if (setOffline()) {
                             errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
                         } else {
@@ -1166,7 +1162,7 @@
     function serverParamObjectMake (serviceName, additionalParameters) {
         enginesis.internalStateSeq += 1;
         // these are defaults that could be overridden with additionalParameters
-        var serverParams = {
+        const serverParams = {
             fn: serviceName,
             language_code: enginesis.languageCode,
             site_id: enginesis.siteId,
@@ -1184,7 +1180,7 @@
             serverParams.game_id = enginesis.gameId;
         }
         if (additionalParameters != null) {
-            for (var key in additionalParameters) {
+            for (const key in additionalParameters) {
                 if (additionalParameters.hasOwnProperty(key)) {
                     serverParams[key] = additionalParameters[key];
                 }
@@ -1252,15 +1248,13 @@
      * @returns {FormData} Form data object to be used in HTTP request.
      */
     function convertParamsToFormData (parameterObject) {
-        var key;
-        var formDataObject;
-
+        let formDataObject;
         if (enginesis.isBrowserBuild) {
             formDataObject = new FormData();
         } else {
             formDataObject = {};
         }
-        for (key in parameterObject) {
+        for (const key in parameterObject) {
             if (parameterObject.hasOwnProperty(key) && typeof parameterObject[key] !== "function" && key != "overRideCallBackFunction") {
                 if (enginesis.isBrowserBuild) {
                     formDataObject.append(key, parameterObject[key]);
@@ -1277,7 +1271,7 @@
      * @returns {boolean} True if set offline, otherwise false for online.
      */
     function setOffline() {
-        var fromOnlineToOffline;
+        let fromOnlineToOffline;
         if (enginesis.isOnline) {
             saveServiceQueue();
             fromOnlineToOffline = true;
@@ -1342,14 +1336,38 @@
     }
 
     /**
+     * Return the domain name and TLD only (remove server name, protocol, anything else) e.g. this function
+     * converts http://www.games.com into games.com or http://www.games-q.com into games-q.com
+     * @param {string} domain A string we expect to contain a domain, like service.enginesis.com.
+     * @return {string} A top-level domain, like enginesis.com.
+     */
+    function serverTail(requestedDomain) {
+        let domain = requestedDomain ? requestedDomain : enginesis.serverHost;
+        let slashPos = domain.indexOf("://");
+        if (slashPos >= 0) {
+            domain = domain.substring(slashPos + 3);
+        }
+        slashPos = domain.indexOf("/");
+        if (slashPos > 0) {
+            domain = domain.substring(0, slashPos);
+        }
+        const domainParts = domain.split(".");
+        const numParts = domainParts.length;
+        if (numParts > 1) {
+            domain = domainParts[numParts - 2] + "." + domainParts[numParts - 1];
+        }
+        return domain;
+    }
+
+    /**
      * Set the server stage we will converse with using some simple heuristics.
      * @param {string} newServerStage Server stage to communicate with.
      * @returns {string} The server stage that was set.
      */
     function qualifyAndSetServerStage (newServerStage) {
-        var regMatch;
-        var currentHost = enginesis.isBrowserBuild ? window.location.host : "enginesis-l.com"; // @todo: How to get host in NodeJS?
-        var isLocalhost = false;
+        const currentHost = enginesis.isBrowserBuild ? window.location.host : "enginesis-l.com"; // @todo: How to get host in NodeJS?
+        let isLocalhost = false;
+        let regMatch;
         enginesis.serverHost = null;
 
         if (newServerStage === undefined || newServerStage === null) {
@@ -1396,13 +1414,11 @@
         }
         if (enginesis.serverHost === null) {
             // convert www.host.tld into enginesis.host.tld
-            var service = "enginesis";
-            var domainParts = currentHost.split(".");
-            var numberOfParts = domainParts.length;
-            var host;
-
+            const service = "enginesis";
+            const domainParts = currentHost.split(".");
+            const numberOfParts = domainParts.length;
             if (numberOfParts > 1) {
-                host = domainParts[numberOfParts - 2].replace(/-[ldqx]$/, "");
+                const host = domainParts[numberOfParts - 2].replace(/-[ldqx]$/, "");
                 if (host != service) {
                     enginesis.serverHost = service + ".";
                 } else {
@@ -1428,7 +1444,7 @@
      * @returns {boolean} true if touch available, false if not.
      */
     function touchDevice () {
-        var isTouch = false;
+        let isTouch = false;
         if (enginesis.isBrowserBuild) {
             if ("ontouchstart" in window) {
                 isTouch = true;
@@ -1478,9 +1494,10 @@
      */
     function queryStringToObject (urlParameterString) {
         const search = /([^&=]+)=?([^&]*)/g;
+        const result = {};
         let match;
-        let result = {};
         let queryString;
+
         function decode(s) {
             return decodeURIComponent(s.replace(/\+/g, " "));
         }
@@ -1517,6 +1534,17 @@
     }
 
     /**
+     * Figure out which domain we want to save the cookie under. We always want to set
+     * the cookie domain to the top-level server, e.g. `enginesis.com`.
+     * @param {string} requestedDomain A proposed domain to set the cookie on. If empty, will use
+     *   the domain of the server we are connecting to.
+     * @returns {string} The domain we want to set the cookie on.
+     */
+    function sessionCookieDomain(requestedDomain) {
+        return serverTail(requestedDomain);
+    }
+
+    /**
      * Set a cookie indexed by the specified key.
      * @param {string} key Indicate which cookie to set.
      * @param {object} value Value to store under key. If null, expire the prior cookie.
@@ -1529,11 +1557,11 @@
      *   a browser environment, such as Node.
      */
     function cookieSet (key, value, expiration, path, domain, isSecure) {
-        var expires;
-        var neverExpires;
-        var sameSite;
-        var cookieData;
+        let cookieData;
 
+        if ( ! domain) {
+            domain = sessionCookieDomain(enginesis.serverHost);
+        }
         if ( ! key || /^(?:expires|max\-age|path|domain|secure)$/i.test(key)) {
             // This is an invalid cookie key.
             return false;
@@ -1542,9 +1570,9 @@
             // remove the cookie by expiring it
             cookieData = "; expires=Thu, 01 Jan 1970 00:00:00 GMT" + (domain ? "; domain=" + domain : "") + (path ? "; path=" + path : "");
         } else {
-            expires = "";
-            neverExpires = "expires=Fri, 31 Dec 9999 23:59:59 GMT";
-            sameSite = "SameSite=LAX";
+            const neverExpires = "expires=Fri, 31 Dec 9999 23:59:59 GMT";
+            const sameSite = "SameSite=LAX";
+            let expires = "";
             if (typeof isSecure === "undefined") {
                 isSecure = true;
             }
@@ -1649,7 +1677,7 @@
     function clearUserSessionInfo() {
         removeObjectWithKey(enginesis.SESSION_USERINFO);
         _clearRefreshToken();
-        cookieSet(enginesis.SESSION_USERINFO, null, 0, "/", "", true);
+        cookieSet(enginesis.SESSION_USERINFO, null, 0, "/", sessionCookieDomain(enginesis.serverHost), true);
         initializeLocalSessionInfo();
     }
 
@@ -1833,7 +1861,7 @@
      */
     function _saveRefreshToken(refreshToken) {
         if ( ! isEmpty(refreshToken)) {
-            var refreshTokenData = {
+            const refreshTokenData = {
                     refreshToken: refreshToken,
                     timestamp: new Date().getTime()
                 };
@@ -1846,7 +1874,7 @@
      * @returns {string} either the token that was saved or null.
      */
     function _getRefreshToken() {
-        var refreshToken = enginesis.refreshToken;
+        let refreshToken = enginesis.refreshToken;
         if (isEmpty(refreshToken)) {
             restoreUserSessionInfo();
             refreshToken = enginesis.refreshToken;
@@ -1892,7 +1920,7 @@
             if (enginesis.anonymousUser == null) {
                 enginesis.anonymousUser = anonymousUserInitialize();
             } else {
-                var cr = enginesis.anonymousUser.cr || "";
+                const cr = enginesis.anonymousUser.cr || "";
                 if (cr != anonymousUserHash()) {
                     enginesis.anonymousUser = anonymousUserInitialize();
                 }
@@ -1913,7 +1941,7 @@
      */
     function anonymousUserSave() {
         if (enginesis.anonymousUser != null) {
-            var anonymousUser = enginesis.anonymousUser;
+            const anonymousUser = enginesis.anonymousUser;
             anonymousUser.favoriteGames = Array.from(enginesis.favoriteGames);
             anonymousUser.gamesPlayed = Array.from(anonymousUser.gamesPlayed);
             anonymousUser.cr = anonymousUserHash();
@@ -1928,7 +1956,7 @@
      * @returns {string} Hash for anonymous user data.
      */
     function anonymousUserHash() {
-        var anonymousUser = enginesis.anonymousUser;
+        const anonymousUser = enginesis.anonymousUser;
         return md5(anonymousUser.subscriberEmail + anonymousUser.userId + anonymousUser.userName + enginesis.developerKey);
     }
 
@@ -1976,7 +2004,8 @@
             encryptString(
                 `site_id=${siteId}&user_id=${userId}&game_id=${gameId}&level_id=${level}&score=${gameScore}&time_played=${timePlayed}&game_data=${gameDataString}`,
                 sessionId
-            ).then(function(encryptedData) {
+            )
+            .then(function(encryptedData) {
                 if (encryptedData) {
                     resolve(encryptedData);
                 } else {
@@ -2039,7 +2068,8 @@
                 if (response && response.ok) {
                     const contentType = response.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
-                        response.json().then(function(enginesisResponse) {
+                        response.json()
+                        .then(function(enginesisResponse) {
                             // if response is good, add to queue then schedule follow up to do the upload.
                             if (enginesisResponse != null) {
                                 if (enginesisResponse.status && enginesisResponse.status.success == "1" && enginesisResponse.results) {
@@ -2084,7 +2114,8 @@
                 errorCode = "SERVICE_ERROR";
                 errorMessage = "Network error from service when requesting token. " + error.toString();
                 reject(makeErrorResponse(errorCode, errorMessage, parameters));
-            }).catch(function (exception) {
+            })
+            .catch(function (exception) {
                 errorCode = "SERVICE_ERROR";
                 errorMessage = "Unexpected response received from service when requesting token with " + exception.toString() + ".";
                 reject(makeErrorResponse(errorCode, errorMessage, parameters));
@@ -2127,9 +2158,10 @@
             fetch(enginesis.siteResources.assetUploadURL, fetchOptions)
             .then(function (response) {
                 if (response && response.ok) {
-                    var contentType = response.headers.get("content-type");
+                    const contentType = response.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
-                        response.json().then(function(enginesisResponse) {
+                        response.json()
+                        .then(function(enginesisResponse) {
                             if (enginesisResponse != null) {
                                 if (enginesisResponse.status && enginesisResponse.status.success == "1") {
                                     resolve(enginesisResponse);
@@ -2190,7 +2222,8 @@
                 },
                 true,
                 ["encrypt", "decrypt"]
-            ).then(function(cryptoKey) {
+            )
+            .then(function(cryptoKey) {
                 const encoder = new TextEncoder();
                 window.crypto.subtle.encrypt(
                     {
@@ -2230,7 +2263,8 @@
                 },
                 true,
                 ["encrypt", "decrypt"]
-            ).then(function(cryptoKey) {
+            )
+            .then(function(cryptoKey) {
                 window.crypto.subtle.decrypt(
                     {
                         name: encryptMethod,
@@ -2363,7 +2397,7 @@
      * @returns {integer} current logged in user id or 0 if no user is logged in.
      */
     userIdGet: function() {
-        return enginesis.isUserLoggedIn ? Math.floor(enginesis.loggedInUserInfo.user_id) : 0;
+        return enginesis.isUserLoggedIn ? Math.floor(enginesis.loggedInUserInfo.user_id) : enginesis.anonymousUser.userId;
     },
 
     /**
@@ -2383,6 +2417,15 @@
             sessionId: enginesis.sessionId,
             sessionExpires: enginesis.sessionExpires
         };
+    },
+
+    /**
+     * Return the domain this session is connected to, for example, enginesis-q.com.
+     * @param {string} domain Proposed domain.
+     * @returns {string} Qualified domain.
+     */
+    sessionDomain: function(domain) {
+        return sessionCookieDomain(domain);
     },
 
     /**
@@ -2421,9 +2464,8 @@
      * @returns {Error} an error object with code set.
      */
     toError: function(enginesisResult) {
-        var error = null;
-        var enginesisStatus = null;
-        var errorMessage = "";
+        let enginesisStatus = null;
+        let errorMessage = "";
         if (enginesisResult) {
             if (enginesisResult.status) {
                 enginesisStatus = enginesisResult.status;
@@ -2442,7 +2484,7 @@
         } else {
             errorMessage = enginesisStatus.message;
         }
-        error = new Error(errorMessage);
+        const error = new Error(errorMessage);
         error.code = enginesisStatus.message;
         return error;
     },
@@ -2453,7 +2495,7 @@
      * @returns {string} The error object reduced to a string of text.
      */
     toErrorString: function (enginesisResult) {
-        var errorMessage = "";
+        let errorMessage = "";
         if (enginesisResult && enginesisResult.results && enginesisResult.results.status) {
             errorMessage += enginesisResult.results.status.message;
             if (enginesisResult.results.status.extended_info) {
@@ -2535,8 +2577,8 @@
      */
     getLoggedInUserInfo: function () {
         if (enginesis.isUserLoggedIn) {
-            var userInfo = {};
-            for (var property in enginesis.loggedInUserInfo) {
+            const userInfo = {};
+            for (const property in enginesis.loggedInUserInfo) {
                 if (enginesis.loggedInUserInfo.hasOwnProperty(property)) {
                     userInfo[property] = enginesis.loggedInUserInfo[property];
                 }
@@ -2569,17 +2611,27 @@
     /**
      * Determine if the user name is a valid format that would be accepted by the server. Since user names are typically
      * provided by users, this helps determine if a proposed user name would be rejected by the server before sending it.
+     * User name requirements are:
+     * - no less than 3 and no more than 50 characters
+     * - no leading or trailing space
+     * - letters and numbers
+     * - specials allowed are ', @, $, !, ~, ., -, space
      * @param {string} userName User name to check.
      * @returns {boolean} True if considered valid.
      */
     isValidUserName: function (userName) {
-        let isValid;
-        if (typeof userName !== "string") {
-            isValid = false;
-        } else {
-            isValid = (userName.length == userName.trim().length) && userName.match(/^[a-zA-Z0-9_@!~\$\.\-\|\s]{3,20}$/) !== null;
-        }
-        return isValid;
+        return typeof(userName) == "string" && userName.trim().length == userName.length && /^[a-zA-Z0-9_@!~\$\.\-\|\'\s?]{3,50}$/.test(userName);
+    },
+
+    /**
+     * Determine if a string looks like a valid email address. This is a simple sanity test,
+     * must be in the form of "something @ something . something".
+     * Old version: return /^(([^<>()\[\]\.,;:\s@\"]+(\.[^<>()\[\]\.,;:\s@\"]+)*)|(\".+\"))@(([^<>()\.,;\s@\"]+\.{0,1})+([^<>()\.,;:\s@\"]{2,}|[\d\.]+))$/.test(email);
+     * @param {string} email String to expect an email address
+     * @returns {boolean} true if we think it is a valid email address.
+     */
+    isValidEmail: function(email) {
+        return /\S+@\S+\.\S+/.test(email);
     },
 
     /**
@@ -2715,8 +2767,8 @@
      * @returns {object} object holding the set of server URLs.
      */
     getSiteSpecificURLs: function() {
-        var urlBase;
-        var siteResources = enginesis.siteResources;
+        const siteResources = enginesis.siteResources;
+        let urlBase;
 
         if (siteResources.profileURL != undefined && siteResources.profileURL.length > 0) {
             urlBase = getProtocol() + siteResources.baseURL;
@@ -2903,6 +2955,106 @@
     },
 
     /**
+     * Call a non-standard API on the server. This function will correctly format the request with
+     * respect to server stage, authentication, and session. It is designed only for special game-specific
+     * endpoints that are properly coded on the Enginesis servers.
+     * @param {string} serviceURL The service endpoint to request. This is expected to be a relative URL on the connected Enginesis stage.
+     * @param {object} parameters Parameters to POST to the endpoint.
+     * @returns {Promise} Resolved with results when the server replies.
+     */
+    requestServiceAPI: function(serviceURL, parameters) {
+        return new Promise(function(resolve) {
+            if (enginesis.isNodeBuild) {
+                sendNodeRequest(serviceName, parameters, function (enginesisResult) {
+                    callbackPriority(enginesisResult, resolve, overRideCallBackFunction, enginesis.callBackFunction);
+                });
+                if (enginesis.nodeRequest == null) {
+                    if (typeof window !== "undefined" && typeof window.fetch !== "undefined") {
+                        enginesis.nodeRequest = window.fetch;
+                    } else {
+                        throw new Error("enginesis.nodeRequest is not set in the node.js environment");
+                    }
+                }
+                enginesis.nodeRequest(serviceURL, {
+                    method: "POST",
+                    headers: formatHTTPHeader(),
+                    body: new URLSearchParams(parameters)
+                })
+                .then(async function(response) {
+                    if (response.status != 200) {
+                        const errorMessage = "Service error " + response.status + " from " + enginesis.siteResources.serviceURL;
+                        resolve(forceErrorResponseString(serviceName, parameters.state_seq, "OFFLINE", errorMessage, parameters));
+                    } else {
+                        response.json()
+                        .then(function (enginesisResult) {
+                            resolve(enginesisResult);
+                        })
+                        .catch(function (error) {
+                            const errorMessage = "Invalid response from Non-standard API at " + enginesis.serverHost + " for " + serviceURL + ": " + error.toString();
+                            const enginesisResult = forceErrorResponseObject(serviceURL, parameters.state_seq, "SERVICE_ERROR", errorMessage, parameters);
+                            debugLog(errorMessage);
+                            resolve(enginesisResult);
+                        });
+                    }
+                })
+                .catch(function(requestError) {
+                    const errorMessage = "Internal error posting to " + enginesis.siteResources.serviceURL + ": " + requestError.toString();
+                    debugLog(errorMessage);
+                    resolve(forceErrorResponseString(serviceName, parameters.state_seq, "OFFLINE", errorMessage, parameters));
+                });
+            } else {
+                fetch(serviceURL, {
+                    method: "POST",
+                    mode: "cors",
+                    cache: "no-cache",
+                    credentials: "same-origin",
+                    headers: formatHTTPHeader(),
+                    body: convertParamsToFormData(parameters)
+                })
+                .then(function (response) {
+                    if (response.status == 200) {
+                        response.json()
+                        .then(function (enginesisResult) {
+                            let errorMessage;
+                            if (enginesisResult == null) {
+                                // If Enginesis fails to return a valid object then the service must have failed, possible the response was not parsable JSON (e.g. error 500)
+                                debugLog("Non-standard API error for " + serviceURL + ": " + response.text());
+                                errorMessage = "Non-standard API service error while contacting Enginesis at " + enginesis.serverHost + " for " + serviceURL;
+                                enginesisResult = forceErrorResponseObject(serviceURL, parameters.state_seq, "SERVICE_ERROR", errorMessage, parameters);
+                            }
+                            resolve(enginesisResult);
+                        })
+                        .catch(function (error) {
+                            const errorMessage = "Invalid response from Non-standard API at " + enginesis.serverHost + " for " + serviceURL + ": " + error.toString();
+                            const enginesisResult = forceErrorResponseObject(serviceURL, parameters.state_seq, "SERVICE_ERROR", errorMessage, parameters);
+                            debugLog(errorMessage);
+                            resolve(enginesisResult);
+                        });
+                    } else {
+                        const errorMessage = "Network error " + response.status + " while contacting Non-standard API at " + enginesis.serverHost + " for " + serviceURL;
+                        const enginesisResult = forceErrorResponseObject(serviceURL, parameters.state_seq, "SERVICE_ERROR", errorMessage, parameters);
+                        debugLog(errorMessage);
+                        resolve(enginesisResult);
+                    }
+                }, function (error) {
+                    errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceURL + ": " + error.toString();
+                    debugLog(errorMessage);
+                    resolve(
+                        forceErrorResponseObject(serviceURL, parameters.state_seq, "OFFLINE", errorMessage, parameters)
+                    );
+                })
+                .catch(function (error) {
+                    errorMessage = "Enginesis Network error encountered, assuming we're offline. " + enginesis.serverHost + " for " + serviceName + ": " + error.toString();
+                    debugLog(errorMessage);
+                    resolve(
+                        forceErrorResponseObject(serviceURL, parameters.state_seq, "OFFLINE", errorMessage, parameters)
+                    );
+                });
+            }
+        });
+    },
+
+    /**
      * Call Enginesis SessionBegin which is used to start any conversation with the server. Must call before beginning a game.
      * @param {string} gameKey service provided game key matching gameId
      * @param {integer|null} gameId The game id. If null/0 then assumes the gameId was set in the constructor or with gameIdSet()
@@ -2916,7 +3068,7 @@
         }
         let siteMark = 0;
         if ( ! enginesis.isUserLoggedIn) {
-            cookieSet(enginesis.anonymousUserKey, enginesis.anonymousUser, 60 * 60 * 24, "/", "", true);
+            cookieSet(enginesis.anonymousUserKey, enginesis.anonymousUser, 60 * 60 * 24, "/", sessionCookieDomain(enginesis.serverHost), true);
             siteMark = enginesis.anonymousUser.userId;
         }
         enginesis.gameId = isEmpty(gameId) ? enginesisContext.gameIdGet() : gameId;
@@ -3395,7 +3547,8 @@
                                 data: base64URLEncode(submitString)
                             },
                             overRideCallBackFunction
-                        ).then(function(enginesisResult) {
+                        )
+                        .then(function(enginesisResult) {
                             resolve(enginesisResult);
                         })
                         .catch(function(exception) {
@@ -3494,53 +3647,54 @@
     registeredUserCreate: function (userName, password, email, realName, dateOfBirth, gender, city, state, zipcode, countryCode, mobileNumber, imId, tagline, siteUserId, networkId, agreement, securityQuestionId, securityAnswer, imgUrl, aboutMe, additionalInfo, sourceSiteId, captchaId, captchaResponse, overRideCallBackFunction) {
         return sendRequest("RegisteredUserCreate", {
             site_id: enginesis.siteId,
-            captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
-            captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse,
             user_name: userName,
-            site_user_id: siteUserId,
-            network_id: networkId,
             real_name: realName,
-            password: password,
             dob: dateOfBirth,
             gender: gender,
+            email_address: email,
             city: city,
             state: state,
             zipcode: zipcode,
-            email_address: email,
             country_code: countryCode,
             mobile_number: mobileNumber,
             im_id: imId,
-            agreement: agreement,
-            security_question_id: 1,
-            security_answer: "",
-            img_url: "",
+            img_url: imgUrl,
             about_me: aboutMe,
             tagline: tagline,
             additional_info: additionalInfo,
-            source_site_id: sourceSiteId
+            site_user_id: siteUserId,
+            network_id: networkId,
+            agreement: agreement,
+            password: password,
+            security_question_id: securityQuestionId,
+            security_answer: securityAnswer,
+            source_site_id: sourceSiteId,
+            captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
+            captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse
         }, overRideCallBackFunction);
     },
 
-    registeredUserUpdate: function (userName, password, email, realName, dateOfBirth, gender, city, state, zipcode, countryCode, mobileNumber, imId, tagline, siteUserId, networkId, agreement, securityQuestionId, securityAnswer, imgUrl, aboutMe, additionalInfo, sourceSiteId, captchaId, captchaResponse, overRideCallBackFunction) {
+    registeredUserUpdate: function (userName, email, realName, dateOfBirth, gender, city, state, zipcode, countryCode, mobileNumber, imId, tagline, imgUrl, aboutMe, additionalInfo, captchaId, captchaResponse, overRideCallBackFunction) {
         return sendRequest("RegisteredUserUpdate", {
             site_id: enginesis.siteId,
-            captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
-            captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse,
+            user_id: enginesis.userId,
             user_name: userName,
             real_name: realName,
             dob: dateOfBirth,
             gender: gender,
+            email_address: email,
             city: city,
             state: state,
             zipcode: zipcode,
-            email_address: email,
             country_code: countryCode,
             mobile_number: mobileNumber,
             im_id: imId,
-            img_url: "",
+            img_url: imgUrl,
             about_me: aboutMe,
             tagline: tagline,
-            additional_info: additionalInfo
+            additional_info: additionalInfo,
+            captcha_id: isEmpty(captchaId) ? enginesis.captchaId : captchaId,
+            captcha_response: isEmpty(captchaResponse) ? enginesis.captchaResponse : captchaResponse,
         }, overRideCallBackFunction);
     },
 
@@ -3651,15 +3805,30 @@
         return sendRequest("SiteListGamesRandom", {num_items: numberOfItems}, overRideCallBackFunction);
     },
 
+    /**
+     * Return public information about user given user name.
+     * @param {string} userName A user name to query.
+     * @param {function} overRideCallBackFunction Function to call with the server response when complete.
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
+     */
     userGetByName: function (userName, overRideCallBackFunction) {
-        // Return public information about user give name
         return sendRequest("UserGetByName", {user_name: userName}, overRideCallBackFunction);
+    },
+
+    /**
+     * Return public information about user given an email address.
+     * @param {string} userName A user name to query.
+     * @param {function} overRideCallBackFunction Function to call with the server response when complete.
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
+     */
+    userGetByEmail: function (emailAddress, overRideCallBackFunction) {
+        return sendRequest("UserGetByEmail", {email_address: emailAddress}, overRideCallBackFunction);
     },
 
     /**
      * Log out the current logged in user. This invalidates any session data we are holding
      * both locally and on the server.
-     * @returns {Promise} A promise that resolves with the server's response.
+     * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userLogout: function(overRideCallBackFunction) {
         return sendRequest("UserLogout", {}, overRideCallBackFunction);
@@ -3680,7 +3849,7 @@
     /**
      * Enginesis co-registration accepts validated login from another network and creates a new user or logs in
      * a matching user. site-user-id, user-name, and network-id are mandatory. Everything else is optional.
-     * @param registrationParameters {object} registration data values. We accept
+     * @param {object} registrationParameters registration data values. We accept
      *   siteUserId
      *   userName
      *   realName
@@ -3905,8 +4074,8 @@
      * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesAssignList: function(game_id_list, overRideCallBackFunction) {
-        var gameIdList = game_id_list.split(",");
-        for (var i = 0; i < gameIdList.length; i ++) {
+        const gameIdList = game_id_list.split(",");
+        for (let i = 0; i < gameIdList.length; i += 1) {
             enginesis.favoriteGames.add(gameIdList[i]);
         }
         const serviceName = "UserFavoriteGamesAssignList";
@@ -3954,8 +4123,8 @@
      * @returns {Promise} Resolves with the EnginesisResponse when the server request completes.
      */
     userFavoriteGamesUnassignList: function(game_id_list, overRideCallBackFunction) {
-        var gameIdList = game_id_list.split(",");
-        for (var i = 0; i < gameIdList.length; i ++) {
+        const gameIdList = game_id_list.split(",");
+        for (let i = 0; i < gameIdList.length; i += 1) {
             enginesis.favoriteGames.delete(gameIdList[i]);
         }
         const serviceName = "UserFavoriteGamesUnassignList";
@@ -3997,14 +4166,13 @@
      * @param {boolean} ifChanged If true, only change the email if it changed. If false, only change the email if never set.
      */
     anonymousUserSetSubscriberEmail: function(emailAddress, ifChanged) {
-        var priorValue;
         if (enginesis.anonymousUser == null) {
             anonymousUserLoad();
         }
         if (typeof ifChanged === "undefined") {
             ifChanged = true;
         }
-        priorValue = enginesis.anonymousUser.subscriberEmail;
+        const priorValue = enginesis.anonymousUser.subscriberEmail;
         if ((ifChanged && emailAddress != priorValue) || ( ! ifChanged && isEmpty(priorValue))) {
             enginesis.anonymousUser.subscriberEmail = emailAddress;
             anonymousUserSave();
@@ -4028,14 +4196,13 @@
      * @param {boolean} ifChanged If true, only change the name if it changed. If false, only change the name if never set.
      */
     anonymousUserSetUserName: function(userName, ifChanged) {
-        var priorValue;
         if (enginesis.anonymousUser == null) {
             anonymousUserLoad();
         }
         if (typeof ifChanged === "undefined") {
             ifChanged = true;
         }
-        priorValue = enginesis.anonymousUser.userName;
+        const priorValue = enginesis.anonymousUser.userName;
         if ((ifChanged && userName != priorValue) || ( ! ifChanged && isEmpty(priorValue))) {
             enginesis.anonymousUser.userName = userName;
             anonymousUserSave();
@@ -4112,7 +4279,7 @@
     },
 
     conferenceGet: function(conferenceId, overRideCallBackFunction) {
-        var visibleId;
+        let visibleId;
         if (parseInt(conferenceId, 10) > 0) {
             visibleId = "";
         } else {
@@ -4123,7 +4290,7 @@
     },
 
     conferenceTopicGet: function(conferenceId, conferenceTopicId, overRideCallBackFunction) {
-        var visibleId;
+        let visibleId;
         if (parseInt(conferenceId, 10) > 0) {
             visibleId = "";
         } else {
@@ -4134,7 +4301,7 @@
     },
 
     conferenceTopicList: function(conferenceId, tags, startDate, endDate, startItem, numItems, overRideCallBackFunction) {
-        var visibleId;
+        let visibleId;
         if (parseInt(conferenceId, 10) > 0) {
             visibleId = "";
         } else {
@@ -4160,7 +4327,7 @@
     } else if (typeof exports === "object") {
         module.exports = enginesisExport;
     } else {
-        var existingEnginesis = window.enginesis;
+        const existingEnginesis = window.enginesis;
         enginesis.existingEnginesis = function () {
             window.enginesis = existingEnginesis;
             return this;
@@ -4168,4 +4335,3 @@
         window.enginesis = enginesisExport;
     }
 })(this);
- 
