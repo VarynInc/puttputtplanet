@@ -10,6 +10,7 @@
       "deploy": "node bin/deploy.js --config=bin/deploy-config.json",
       "lint": "npm exec -- eslint ./public/js/*.js",
       "test": "jest test",
+      "updatemodules": "node ./bin/updateModules.js",
       "versionup": "node bin/versionUp.js --debug --task build --path ./"
     },
     "repository": {

@@ -815,8 +815,8 @@ class Enginesis {
 
     /**
      * Force-set the last error message for internal (non-API) errors.
-     * @param $errorCode string A typical Enginesis error code.
-     * @param $errorMessage string An optional error message.
+     * @param string $errorCode A typical Enginesis error code.
+     * @param string $errorMessage An optional error message.
      * @return null|object Returns the lastError object, null if the last error was successful.
      */
     private function setLastError ($errorCode, $errorMessage) {
@@ -827,6 +827,15 @@ class Enginesis {
             $this->m_lastError = ['success' => $success, 'message' => $errorCode, 'extended_info' => $errorMessage];
         }
         return $this->m_lastError;
+    }
+
+    /**
+     * For cases where we identify an error in the local client and do not need to contact the
+     * server we can immediately return the error.
+     */
+    private function setLocalError ($errorCode, $errorMessage) {
+        $this->setLocalError($errorCode, $errorMessage);
+        return null;
     }
 
     /**
@@ -3259,6 +3268,40 @@ class Enginesis {
     }
 
     /**
+     * Return a list of conferences matching the search criteria.
+     * @param string $tags A list of tags to search for matching conferences.
+     * @param date $startDate Match recent activity on or after this date. Default is 30 days ago.
+     * @param date $endDate Match recent activity before this date. Default is today.
+     * @param integer $startItem For paging, return items after this item index. Default is 1.
+     * @param integer $numItems For paging, return no more than this number of items. Default is 50.
+     * @param boolean $includePublic True to include public conferences, false to include only conferences the current logged in user is a member of.
+     */
+    public function conferenceList($tags, $startDate, $endDate, $startItem, $numItems, $includePublic) {
+        $service = 'ConferenceList';
+        // verify tags
+        // start date default is 1 month ago
+        // end date is today
+        if ($startItem < 1) {
+            $startItem = 1;
+        }
+        if ($numItems > 100) {
+            $numItems = 100;
+        } elseif ($numItems < 1) {
+            $numItems = 50;
+        }
+        $parameters = [
+            'tags' => $tags,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'start_item' => $startItem,
+            'num_items' => $numItems,
+            'include_public_non_member' => $includePublic ? 1 : 0,
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
      * Return meta information about a specific conference.
      */
     public function conferenceGet($conferenceId) {
@@ -3328,6 +3371,135 @@ class Enginesis {
             'end_date' => $this->mySQLDate($endDate),
             'start_item' => $startItem,
             'num_items' => $numItems
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * Create a new conference.
+     */
+    public function conferenceCreate($visibleId, $conferenceCategoryId, $title, $description, $tags, $icon, $thumbnail, $coverImage, $isPrivate, $groupId) {
+        $service = 'ConferenceCreate';
+        $parameters = [
+            'visible_id' => $visibleId,
+            'conference_category_id' => $conferenceCategoryId,
+            'title' => $title,
+            'description' => $description,
+            'tags' => $tags,
+            'icon' => $icon,
+            'thumbnail' => $thumbnail,
+            'cover_image' => $coverImage,
+            'is_private' => $isPrivate,
+            'group_id' => $groupId
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * Update the attributes of an existing conference.
+     */
+    public function conferenceUpdate($conferenceId, $visibleId, $conferenceCategoryId, $title, $description, $tags, $icon, $thumbnail, $coverImage, $isPrivate, $groupId) {
+        $service = 'ConferenceUpdate';
+        $parameters = [
+            'conference_id' => $conferenceId,
+            'visible_id' => $visibleId,
+            'conference_category_id' => $conferenceCategoryId,
+            'title' => $title,
+            'description' => $description,
+            'tags' => $tags,
+            'icon' => $icon,
+            'thumbnail' => $thumbnail,
+            'cover_image' => $coverImage,
+            'is_private' => $isPrivate,
+            'group_id' => $groupId
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    /**
+     * Return a list of the user's saved scratchpads. There must be a logged in user
+     * for this query to return results.
+     */
+    public function userScratchpadList() {
+        if ( ! $this->m_isLoggedIn) {
+            return $this->setLocalError(EnginesisErrors::NOT_LOGGED_IN, 'Services requires a logged in user.');
+        }
+        $service = 'UserScratchpadList';
+        $parameters = [];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    public function userScratchpadCreate($label, $shardId, $tags, $sortOrder, $text) {
+        if ( ! $this->m_isLoggedIn) {
+            return $this->setLocalError(EnginesisErrors::NOT_LOGGED_IN, 'Services requires a logged in user.');
+        }
+        $service = 'UserScratchpadCreate';
+        $sortOrder = intval($sortOrder);
+        $parameters = [
+            'label' => $label,
+            'shard_id' => $shardId,
+            'tags' => $tags,
+            'sort_order' => $sortOrder,
+            'scratchpad_text' => $text
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    public function userScratchpadUpdate($scratchpadId, $label, $shardId, $tags, $sortOrder, $text) {
+        if ( ! $this->m_isLoggedIn) {
+            return $this->setLocalError(EnginesisErrors::NOT_LOGGED_IN, 'Services requires a logged in user.');
+        }
+        $service = 'UserScratchpadUpdate';
+        $sortOrder = intval($sortOrder);
+        $parameters = [
+            'user_scratchpad_id' => $scratchpadId,
+            'label' => $label,
+            'shard_id' => $shardId,
+            'tags' => $tags,
+            'sort_order' => $sortOrder,
+            'scratchpad_text' => $text
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    public function userScratchpadUpdateText($scratchpadId, $text) {
+        if ( ! $this->m_isLoggedIn) {
+            return $this->setLocalError(EnginesisErrors::NOT_LOGGED_IN, 'Services requires a logged in user.');
+        }
+        $service = 'UserScratchpadUpdateText';
+        $parameters = [
+            'user_scratchpad_id' => $scratchpadId,
+            'scratchpad_text' => $text
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    public function userScratchpadGet($scratchpadId) {
+        if ( ! $this->m_isLoggedIn) {
+            return $this->setLocalError(EnginesisErrors::NOT_LOGGED_IN, 'Services requires a logged in user.');
+        }
+        $service = 'UserScratchpadGet';
+        $parameters = [
+            'user_scratchpad_id' => $scratchpadId
+        ];
+        $enginesisResponse = $this->callServerAPI($service, $parameters);
+        return $this->setLastErrorFromResponse($enginesisResponse);
+    }
+
+    public function userScratchpadDelete($scratchpadId) {
+        if ( ! $this->m_isLoggedIn) {
+            return $this->setLocalError(EnginesisErrors::NOT_LOGGED_IN, 'Services requires a logged in user.');
+        }
+        $service = 'UserScratchpadDelete';
+        $parameters = [
+            'user_scratchpad_id' => $scratchpadId
         ];
         $enginesisResponse = $this->callServerAPI($service, $parameters);
         return $this->setLastErrorFromResponse($enginesisResponse);

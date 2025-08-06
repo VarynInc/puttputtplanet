@@ -6,7 +6,7 @@
     <title>Putt Putt Planet</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <link rel="manifest" href="site.webmanifest">
-    <link rel="icon" type="image/png" href="icon-32.png">
+    <link rel="icon" type="image/png" href="/images/32.png">
     <link rel="apple-touch-icon" href="icon.png">
     <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
     <META NAME="Description" CONTENT="Putt Putt Planet is the mini golf destination on the internet">
@@ -37,7 +37,7 @@
         </div>
         <div class="row justify-content-center">
             <div class="col-2 text-center">
-                <a href="https://www.varyn.com" target="_blank" title="Varyn - game development, game technology, game consulting services">
+                <a href="https://varyn.com" target="_blank" title="Varyn - game development, game technology, game consulting services">
                 <img class="varyn-logo-footer" src="/images/Varyn-Logo-250x150.png" alt="Varyn, Inc." />
                 </a><br>
                 <span class="poweredby">Developed by Varyn</span>
@@ -46,7 +46,7 @@
                 <span class="copyright">Copyright &copy; 2010 Varyn, Inc. All rights reserved.</span  >
             </div>
             <div class="col-2 text-center">
-                <a href="https://www.enginesis.com" target="_blank" title="Enginesis - social games platform encompassing all back-end services needed for any social game">
+                <a href="https://enginesis.com" target="_blank" title="Enginesis - social games platform encompassing all back-end services needed for any social game">
                 <img src="/images/EcolorLogoMicro.png" width="28" height="37" alt="Enginesis Social Games Platform" />
                 </a><br>
                 <span class="poweredby">Powered by Enginesis</span>
