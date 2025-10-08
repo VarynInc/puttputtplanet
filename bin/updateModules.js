@@ -12,6 +12,10 @@ const configuration = {
     librariesSourcePath: "../../libraries/",
     librariesManifest: [
         {
+            source: "EnginesisSDK/enginesis-php/source/common.php",
+            destination: "./services/common.php"
+        },
+        {
             source: "EnginesisSDK/enginesis-php/source/Enginesis.php",
             destination: "./services/Enginesis.php"
         },

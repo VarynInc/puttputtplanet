@@ -6,10 +6,12 @@
     "main": "bin/build.js",
     "scripts": {
       "build": "node bin/build.js",
+      "checkdiff": "bash ./bin/checkdiff.sh",
       "clean": "rm -rf ./node_modules && rm -rf ./distrib && rm ./data/logs/*.log",
       "deploy": "node bin/deploy.js --config=bin/deploy-config.json",
       "lint": "npm exec -- eslint ./public/js/*.js",
       "test": "jest test",
+      "updatedependencies": "node ../../libraries/npm-check-updates/build/cli.js -u",
       "updatemodules": "node ./bin/updateModules.js",
       "versionup": "node bin/versionUp.js --debug --task build --path ./"
     },
@@ -33,21 +35,21 @@
     "homepage": "https://puttputtplanet.com",
     "devDependencies": {
       "async": "^3.2.6",
-      "axios": "^1.9.0",
-      "chalk": "^4.1.2",
-      "cheerio": "^1.0.0",
-      "eslint": "^9.25.1",
-      "fs-extra": "^10.1.0",
-      "glob": "^7.2.0",
-      "gulp-rename": "^2.0.0",
-      "imagemin": "^7.0.1",
-      "jest": "^29.7.0",
+      "axios": "^1.12.2",
+      "chalk": "^5.6.2",
+      "cheerio": "^1.1.2",
+      "eslint": "^9.37.0",
+      "fs-extra": "^11.3.2",
+      "glob": "^11.0.3",
+      "gulp-rename": "^2.1.0",
+      "imagemin": "^9.0.1",
+      "jest": "^30.2.0",
       "os": "^0.1.2",
       "path": "^0.12.7",
-      "pretty-bytes": "^5.6.0",
+      "pretty-bytes": "^7.1.0",
       "rsync": "^0.6.1",
-      "shelljs": "^0.9.2",
-      "terser": "^5.39.0",
-      "yargs": "^17.7.2"
+      "shelljs": "^0.10.0",
+      "terser": "^5.44.0",
+      "yargs": "^18.0.0"
     }
 }

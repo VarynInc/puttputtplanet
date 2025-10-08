@@ -4,7 +4,6 @@
  * We expect to find a string "gameVersion: "#.#.#"," in the first file.
  * In each file specified, we replace the first occurrence of #.#.# with the new version number.
  **/
-
 import fs from "fs";
 import commandLineArgs from "yargs";
 import { hideBin } from "yargs/helpers";

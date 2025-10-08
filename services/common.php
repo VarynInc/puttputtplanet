@@ -142,6 +142,16 @@ function makeErrorResponse($errorCode, $errorMessage, $parameters) {
     return $contents;
 }
 
+/**
+ * Determine if the response looks like a valid Enginesis response.
+ *
+ * @param EnginesisResponse $enginesisResponse An EnginesisResponse object.
+ * @return boolean Indicates if the EnginesisResponse is considered a valid object.
+ */
+function isValidEnginesisResponse($enginesisResponse) {
+    return is_object($enginesisResponse) && isset($enginesisResponse->results) && isset($enginesisResponse->results->status);
+}
+
 // =================================================================
 // HTTP and client/server helper functions
 // =================================================================
@@ -204,6 +214,33 @@ function appendQueryParameters($url, $keyValues) {
     $updatedURL = $url;
     foreach($parameters as $key => $value) {
         $updatedURL = appendQueryParameter($updatedURL, $key, $value);
+    }
+    return $updatedURL;
+}
+
+/**
+ * Append a query parameter string on to the end of a URL string.
+ * @param string $url The initial URL. Can be null or empty string.
+ * @param string $parameters A string of parameters in the form k=v&k=v.
+ * @return string A new URL with query parameters.
+ */
+function appendQueryString($url, $parameters) {
+    if (empty($url)) {
+        $updatedURL = '';
+    } else {
+        $updatedURL = $url;
+    }
+    if (empty($parameters)) {
+        $parameters = '';
+    }
+    $hasQuery = strpos($updatedURL, '?');
+    if ($hasQuery === false) {
+        $updatedURL .= '?';
+    }
+    if ($parameters[0] == '&' || $parameters[0] == '?') {
+        $updatedURL .= substr($parameters, 1);
+    } else {
+        $updatedURL .= $parameters;
     }
     return $updatedURL;
 }
@@ -301,6 +338,17 @@ function getPostOrRequestVar ($varName, $defaultValue = NULL) {
 }
 
 /**
+ * Return a variable we expect to be an integer that was posted from a form, or in the REQUEST object (GET or COOKIES), or a default if not found.
+ * This way POST is the primary concern but if not found will fallback to the other methods.
+ * @param string|array $varName variable to read from request. If array, iterates array of strings until the first entry returns a result.
+ * @param mixed $defaultValue A value to return if the parameter is not provided in the request.
+ * @return mixed The value of the parameter or $defaultValue.
+ */
+function getPostOrRequestInt ($varName, $defaultValue = 0) {
+    return intval(getPostOrRequestVar($varName, $defaultValue));
+}
+
+/**
  * Return a variable that was posted from a form, or a default if not found.
  * @param string|array $varName variable to read from POST. If array, iterates array of strings until the first entry returns a result.
  * @param mixed $defaultValue A value to return if the parameter is not provided in the POST.
@@ -325,6 +373,16 @@ function getPostVar ($varName, $defaultValue = NULL) {
         }
     }
     return $value;
+}
+
+/**
+ * Return a variable that we expect to be an integer that was posted from a form, or a default if not found.
+ * @param string|array $varName variable to read from POST. If array, iterates array of strings until the first entry returns a result.
+ * @param mixed $defaultValue A value to return if the parameter is not provided in the POST.
+ * @return mixed The value of the parameter or $defaultValue.
+ */
+function getPostInt ($varName, $defaultValue = 0) {
+    return intval(getPostVar($varName, $defaultValue));
 }
 
 /**
@@ -358,10 +416,11 @@ function setHTTPHeader() {
         return;
     }
     $stage = serverStage();
-    $domains = "enginesis$stage.com *.enginesis$stage.com enginesis." . ENGINESIS_SITE_KEY . "$stage.com";
+    $domains = "https://" . ENGINESIS_SITE_KEY . "$stage.com https://enginesis$stage.com https://*.enginesis$stage.com https://enginesis." . ENGINESIS_SITE_KEY . "$stage.com";
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
-    // header("Content-Security-Policy: default-src 'self' $domains; img-src *;");
-    header("Content-Security-Policy: *;");
+    header("Content-Security-Policy: *; img-src *;");
+    header("Content-Security-Policy: default-src 'self' $domains;");
+    header("Content-Security-Policy: worker-src 'self' $domains blob:;");
 }
 
 /**
@@ -371,12 +430,59 @@ function setHTTPHeader() {
 function getHTTPOrigin() {
     if (array_key_exists('HTTP_ORIGIN', $_SERVER)) {
         $origin = $_SERVER['HTTP_ORIGIN'];
+        $urlParts = parse_url($origin);
+        if ( ! empty($urlParts['host'])) {
+            $origin = $urlParts['host'];
+        }
     } elseif (array_key_exists('HTTP_REFERER', $_SERVER)) {
         $origin = $_SERVER['HTTP_REFERER'];
+        $urlParts = parse_url($origin);
+        if ( ! empty($urlParts['host'])) {
+            $origin = $urlParts['host'];
+        }
     } else {
-        $origin = $_SERVER['REMOTE_ADDR'];
+        $origin = getHTTPClient();
     }
     return $origin;
+}
+
+/**
+ * Return the referring client information. You can request just the referrer or a complete report
+ * that includes origin and remote address separated with `|`.
+ * @param boolean Set to true to return referrer, origin, and IP address of client. Set to false to only return the HTTP referer.
+ * @return string The referring client information.
+ */
+function getHTTPReferrer($completeReport = true) {
+    $referrer = (isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '');
+    if ($completeReport) {
+        $referrer .= ' | ' . getHTTPOrigin() . ' | ' . getHTTPClient();
+    }
+    return $referrer;
+}
+
+/**
+ * Determine the IP address of the client making the request. We look at
+ * several possible request header attributes and choose the first one
+ * we come across.
+ * @return string|null Client IP address as it appears in the request header, of null if none found.
+ */
+function getHTTPClient() {
+    $headerAttributes = [
+        'HTTP_CF_CONNECTING_IP',
+        'HTTP_X_SUCURI_CLIENTIP',
+        'HTTP_CLIENT_IP',
+        'HTTP_X_FORWARDED_FOR',
+        'HTTP_X_FORWARDED',
+        'HTTP_FORWARDED_FOR',
+        'HTTP_FORWARDED',
+        'REMOTE_ADDR'
+    ];
+    foreach ($headerAttributes as $attribute) {
+        if ( ! empty($_SERVER[$attribute])) {
+            return $_SERVER[$attribute];
+        }
+    }
+    return null;
 }
 
 /**
@@ -438,71 +544,106 @@ function looksLikeURLPattern($proposedURL) {
 }
 
 /**
- * The blowfish encryption algorithm requires data length is a multiple of 8 bytes. This
- * function pads the string to the nearest 8 byte boundary.
+ * Convert a string to a "slug". The result string can be used as a DOM id, a path part, or a safe string.
+ * Rules:
+ *   * Only allow A-Z, a-z, 0-9, dash, space.
+ *   * Trim any leading or trailing space.
+ *   * Only lowercase characters.
+ *   * Max length 50.
+ * @param $string
+ * @return {string}
  */
-function blowfishPad ($text) {
-    $imod = 8 - (strlen($text) % 8);
-    for ($i = 0; $i < $imod; $i ++) {
-        $text .= chr($imod);
-    }
-    return $text;
+function stringToSlug($string) {
+    $separator = '-';
+    $sluggish = strtolower(preg_replace('/[^A-Za-z0-9-]+/', $separator, trim($string)));
+    $sluggish = substr(trim(preg_replace('/-{2,}/', $separator, $sluggish)), 0, 50);
+    return $sluggish;
 }
 
 /**
- * After blowfish decryption, remove any padding that was applied to the original data.
+ * Decode a base64 encoded string into its binary representation.
+ * @param string $data A string of translated base-64 characters to translate back to binary.
+ * @return string A binary string.
  */
-function blowfishUnpad ($text) {
-    $textLen = strlen($text);
-    if ($textLen > 0) {
-        $padLen = ord($text[$textLen - 1]);
-        if ($padLen > 0 && $padLen <= 8) {
-            return substr($text, 0, $textLen - $padLen);
-        }
-    }
-    return $text;
+function base64Decode($data) {
+    return base64_decode(base64URLDecode($data));
 }
 
 /**
- * Replace base64 chars that are not URL safe.
+ * Replace base-64 chars that are not URL safe. This will help transmit a base-64 string
+ * over the internet by translating '-_~' into '+/='.
+ * @param string $data A string of translated base-64 characters to translate back to true base-64.
+ * @return string Translates '-_~' found in $data to '+/='.
  */
 function base64URLDecode($data) {
-    return base64_decode(strtr($data, ['-' => '+', '_' => '/', '~' => '='])); // '-_~', '+/='));
+    return strtr($data, ['-' => '+', '_' => '/', '~' => '=']);
 }
 
 /**
- * Replace base64 chars that are not URL safe.
+ * Translate a string of data (possibly binary) into its base-64 representation. In
+ * additions, this also makes the string URL safe by translating '+/=' into '-_~'.
+ * Use `base64URLDecode` to get it back to true base-64.
+ * @param string $data A string to translate into base-64 representation.
+ * @return string Translated string represented as base-64 with URL safe ('+/=' is '-_~').
+ */
+function base64Encode($data) {
+    return base64URLEncode(base64_encode($data));
+}
+
+/**
+ * Replace base-64 chars that are not URL safe. This will help transmit a base-64 string
+ * over the internet by translating '+/=' into '-_~'.
+ * @param string $data A string of base-64 characters to translate.
+ * @return string Translates '+/=' found in $data to '-_~'.
  */
 function base64URLEncode($data) {
-    return strtr(base64_encode($data), ['+' => '-', '/' => '_', '=' => '~']); // '+/=', '-_~');
+    return strtr($data, ['+' => '-', '/' => '_', '=' => '~']);
 }
 
 /**
- * Encrypt a string of data with a key.
- * @param $data {string} A clear string of data to encrypt.
- * @param $key {string} The encryption key, represented as a hex string.
- * @return {string} a base-64 representation of the encrypted data.
+ * Encrypt a string of data with a hexadecimal key using AES 256 CBC mode.
+ * @param string $data A clear string of data to encrypt.
+ * @param string $key The encryption key, represented as a string of at least 32 hexadecimal digits.
+ * @return string The encrypted data. An empty string if an error occurred.
  */
 function encryptString($data, $key) {
-    $keyLength = strlen($key);
-    if ($keyLength < 16) {
-        $key = str_repeat($key, ceil(16/$keyLength));
+    global $enginesisLogger;
+    if (empty($data) || empty($key)) {
+        return '';
     }
-    return base64URLEncode(openssl_encrypt(blowfishPad($data), 'BF-ECB', pack('H*', $key), OPENSSL_RAW_DATA | OPENSSL_NO_PADDING));
+    $sslOptions = 0;
+    $keyLength = strlen($key);
+    if ($keyLength < 32) {
+        $key = str_repeat($key, ceil(32 / $keyLength));
+    }
+    $iv = substr($key, 3, 16);
+    $encrypted = openssl_encrypt($data, 'AES-256-CBC', $key, $sslOptions, $iv);
+    if ($encrypted !== false) {
+        return $encrypted;
+    } else {
+        $enginesisLogger->log("openssl_encrypt error $key ($data)", LogMessageLevel::Error, 'SYS', __FILE__, __LINE__);
+        return '';
+    }
 }
 
 /**
  * Decrypt a string of data that was encrypted with `encryptString()` using the same key.
- * @param $data {string} An encrypted string of data to decrypt.
- * @param $key {string} The encryption key, represented as a hex string.
- * @return {string} the clear string that was originally encrypted.
+ *
+ * @param string $data An encrypted string of data to decrypt.
+ * @param string $key The encryption key, represented as a hex string. Key should be 32 hex digits.
+ * @return string The clear string that was originally encrypted.
  */
 function decryptString($data, $key) {
-    $keyLength = strlen($key);
-    if ($keyLength < 16) {
-        $key = str_repeat($key, ceil(16/$keyLength));
+    if (empty($data) || empty($key)) {
+        return '';
     }
-    return blowfishUnpad(openssl_decrypt(base64URLDecode($data), 'BF-ECB', pack('H*', $key), OPENSSL_RAW_DATA | OPENSSL_NO_PADDING));
+    $sslOptions = 0;
+    $keyLength = strlen($key);
+    if ($keyLength < 32) {
+        $key = str_repeat($key, ceil(32 / $keyLength));
+    }
+    $iv = substr($key, 3, 16);
+    return openssl_decrypt($data, 'AES-256-CBC', $key, $sslOptions, $iv);
 }
 
 /**
@@ -553,9 +694,10 @@ function verifyHashPassword ($password, $hashStoredInDatabase) {
  * @param string is the URL to contact without any query string (use $get_params)
  * @param array GET parameters are key => value arrays
  * @param array POST parameters as a key => value array.
+ * @param array Array of additional HTTP headers to set.
  * @return string|null the web page content as a string. Returns null if the request failed.
  */
-function getURLContents ($url, $get_params = null, $post_params = null) {
+function getURLContents ($url, $get_params = null, $post_params = null, $headers = null) {
     $post_string = '';
     if ($get_params != null) {
         $query_string = '';
@@ -583,6 +725,9 @@ function getURLContents ($url, $get_params = null, $post_params = null) {
         if ($post_string != '') {
             curl_setopt($ch, CURLOPT_POST, 1);
             curl_setopt($ch, CURLOPT_POSTFIELDS, $post_string);
+        }
+        if ($headers && count($headers) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         }
         if (startsWith(strtolower($url), 'https://')) {
             $sslCertificate = SERVER_PRIVATE_PATH . 'cacert.pem';
@@ -981,7 +1126,7 @@ function randomString ($length, $maxCodePoint = 32, $reseed = false) {
  */
 function makeInputFormHackerToken () {
     global $enginesis;
-    $expirationTime = 30; // 30 minutes. TODO: Is this a reasonable amount of time?
+    $expirationTime = 30; // 30 minutes. @todo: Is this a reasonable amount of time?
     $hackerToken = md5($enginesis->getServerName()) . '' . floor(time() / ($expirationTime * 60));
     return $hackerToken;
 }
@@ -1015,21 +1160,22 @@ function verifyFormHacks($inputFormNames) {
     $thisFieldMustBeEmpty = isset($_POST[$inputFormNames[0]]) ? $_POST[$inputFormNames[0]] : 'hacker';
     $hackerToken = isset($_POST[$inputFormNames[1]]) ? $_POST[$inputFormNames[1]] : '0';
     $isVerified = $thisFieldMustBeEmpty === '' && validateInputFormHackerToken($hackerToken);
-    debugLog("verifyFormHacks token=$hackerToken (try " . makeInputFormHackerToken() . ") honeypot='$thisFieldMustBeEmpty' result " . ($isVerified ? 'OK' : 'HACK!'));
+    if ( ! $isVerified) {
+        debugError("verifyFormHacks check failed from " . getHTTPClient() . " token=$hackerToken (try " . makeInputFormHackerToken() . ") honeypot='$thisFieldMustBeEmpty'");
+    }
     return $isVerified;
 }
 
 /**
  * Helper function to determine if the current session is valid. What we are looking for:
- *   1. User id and token exist
- *   2. user id matches token
- *   3. not expired
+ *   1. user id matches token
+ *   2. token not expired
  * @param $userId
- * @param $token
- * @return bool
+ * @param $authToken
+ * @return boolean True if the session is valid.
  */
-function verifySessionIsValid($userId, $token) {
-    // TODO: We need to write the code for this!
+function verifySessionIsValid($userId, $authToken) {
+    // @todo: We need to write the code for this!
     return true;
 }
 
@@ -1135,14 +1281,15 @@ function isEmpty ($value) {
 }
 
 /**
- * Determine if a string begins with a specific string.
- * @param $haystack
- * @param $needle string|array
- * @return bool
+ * Determine if a string begins with a specific string. This does exact match so it is case sensitive.
+ *
+ * @param string The string to search against.
+ * @param string|array The string to search for in $haystack.
+ * @return boolean true if $haystack starts with $needle.
  */
 function startsWith($haystack, $needle) {
     if (is_array($needle)) {
-        for ($i = 0; $i < count($needle); $i ++) {
+        for ($i = 0; $i < count($needle); $i += 1) {
             if (startsWith($haystack, $needle[$i])) {
                 return true;
             }
@@ -1154,14 +1301,15 @@ function startsWith($haystack, $needle) {
 }
 
 /**
- * Deterine if a string ends with a specific string.
- * @param $haystack
- * @param $needle string|array
- * @return bool
+ * Determine if a string ends with a specific string.
+ *
+ * @param string String to consider.
+ * @param string|array What to match in $haystack.
+ * @return boolean true if $haystack ends with $needle.
  */
 function endsWith($haystack, $needle) {
     if (is_array($needle)) {
-        for ($i = 0; $i < count($needle); $i ++) {
+        for ($i = 0; $i < count($needle); $i += 1) {
             if (endsWith($haystack, $needle[$i])) {
                 return true;
             }
@@ -1174,8 +1322,8 @@ function endsWith($haystack, $needle) {
 
 /**
  * Transform a string into a safe to show inside HTML string. Unsafe HTML chars are converted to their escape equivalents.
- * @param $string a string to transform.
- * @return string the transformed string.
+ * @param string A string to transform.
+ * @return string The transformed string.
  */
 function safeForHTML ($string) {
     $htmlEscapeMap = [
@@ -1222,7 +1370,7 @@ function str_contains_char ($string, $selectChars, $start = 0, $length = 0) {
             }
         }
     } elseif (is_array($selectChars)) {
-        // TODO: End is not considered
+        // @todo: End is not considered
         for ($i = 0; $i < count($selectChars); $i ++) {
             if (strpos($string, $selectChars[$i], $start) !== false) {
                 return true;
@@ -1281,20 +1429,29 @@ function valueToBoolean($variable) {
 }
 
 /**
- * Convert an integer value to its boolean representation.
- * @param $val
- * @return bool
+ * Convert an integer value to its boolean representation. A value is considered true
+ * if it is not 0.
+ *
+ * @param integer $value A value to interpret as a boolean value.
+ * @return boolean True if $value is interpreted to be a true value, otherwise false.
  */
-function castIntToBool ($val) {
-    if (is_string($val)) {
-        $val = strtolower($val);
-        if ($val == 'true' || $val == 'false') {
-            return ($val != 'false');
-        } else {
-            return ($val != '0');
-        }
+function castIntToBool ($value) {
+    return castValueToBool($value);
+}
+
+/**
+ * Convert a value to its boolean representation. A value is considered true
+ * if it is "true|t|yes|y|1" or evaluates to a true value, such as a non-0 integer.
+ *
+ * @param integer|string $value A value to interpret as a boolean value.
+ * @return boolean True if $value is interpreted to be a true value, otherwise false.
+ */
+function castValueToBool ($value) {
+    if (is_string($value)) {
+        $value = strtolower($value);
+        return ! ($value === 'f' || $value === 'n' || $value === 'false' || $value === 'no' || $value === 'off' || $value === '0');
     } else {
-        return ($val != 0);
+        return $value != 0;
     }
 }
 
@@ -1319,11 +1476,14 @@ function castBoolToInt ($value) {
 /**
  * Return a string representation of a boolean value. If the value is not a true boolean then it will be
  * implicitly cast to boolean.
- * @param $value
+ *
+ * @param mixed $value Any value to test, it will be coerced to a boolean.
+ * @param string $trueValue The value to return if $value is considered true. Default is 'true'.
+ * @param string $falseValue The value to return if $value is considered false. Default is 'false'.
  * @return string
  */
-function castBoolToString($value) {
-    return $value ? 'true' : 'false';
+function castBoolToString($value, $trueValue = 'true', $falseValue = 'false') {
+    return $value ? $trueValue : $falseValue;
 }
 
 /**
@@ -1371,14 +1531,17 @@ function cleanUserName ($userName) {
 }
 
 /**
- * Performs basic user password validation. The password can be any printable characters between 8 and 20 in length
+ * Performs basic user password validation. The password can be any printable characters between 8 and 32 in length
  * with no leading or trailing spaces.
  * @param string $password The password to check.
  * @return bool true if acceptable otherwise false.
  */
 function isValidPassword ($password) {
+    if (empty($password)) {
+        return false;
+    }
     $minPasswordLength = 8;
-    $maxPasswordLength = 20;
+    $maxPasswordLength = 32;
     $len = strlen(trim($password));
     return $len == strlen($password) && ctype_graph($password) && $len >= $minPasswordLength && $len <= $maxPasswordLength;
 }
@@ -1425,6 +1588,9 @@ function checkEmailAddress ($email) {
  * @return string The $input string with any extended characters converted to their common ascii equivalent.
  */
 function cleanString ($input) {
+    if (empty($input)) {
+        return '';
+    }
     $search = [
         '/[\x60\x82\x91\x92\xb4\xb8]/i',             // single quotes
         '/[\x84\x93\x94]/i',                         // double quotes
@@ -1441,12 +1607,14 @@ function cleanString ($input) {
 }
 
 /**
- * Remove non-ASCII extended characters and convert HTML to entities.
+ * Remove non-ASCII extended characters, remove new lines, strip HTML tags, convert HTML to entities,
+ * and trim leading and trailing white space.
+ *
  * @param string $source The string to clean.
  * @return string The source string cleaned of all bad characters.
  */
 function fullyCleanString($source) {
-    return htmlspecialchars(strip_tags(cleanString($source)));
+    return htmlspecialchars(trim(str_replace("\n", '', strip_tags(cleanString($source)))));
 }
 
 /**
@@ -1456,6 +1624,9 @@ function fullyCleanString($source) {
  * @return string Proposed file name with undesired characters removed.
  */
 function cleanFileName ($fileName) {
+    if (empty($fileName)) {
+        return '';
+    }
     return str_replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|', '`', '\''], '', $fileName);
 }
 
@@ -1476,18 +1647,26 @@ function stripTagsAttributes ($source, $allowedTags = [], $disabledAttributes = 
     }
 }
 
-function profanityFilter (&$strTest) {
-    // TODO: This needs work
-    $strTest = strtolower($strTest);
-    $strOld = $strTest;
-    $fullwordlistban = "ass|asshole|pussy";
-    $partialwordlistban = "fuck|cunt|shit|dick|bitch|penis";
-    $strTest = preg_replace("/\b($fullwordlistban)\b/ie", 'preg_replace("/./","*","\\1")', $strTest);
-    $strTest = preg_replace("/($partialwordlistban)/ie", 'preg_replace("/./","*","\\1")', $strTest);
-    if ($strTest == $strOld) {
+/**
+ * Filter bad or undesirable words from a proposed string.
+ * @todo: This needs work it doesn't seem to be all that useful.
+ *
+ * @param string $strTest A reference to a string to filter. Recognized bad words are replaced with '*'. This string is replaced with the filtered string.
+ * @return boolean True if a filter was performed, false if no filtering was required.
+ */
+function profanityFilter ( & $strTest) {
+    $original = substr($strTest, 0);
+    $filtered = substr($strTest, 0);
+    $fullwordlistban = 'ass|asshole|pussy';
+    $partialwordlistban = 'fuck|cunt|shit|dick|bitch|penis';
+    $filtered = preg_replace("/\b($fullwordlistban)\b/i", '*', $filtered);
+    $filtered = preg_replace("/($partialwordlistban)/i", '*', $filtered);
+    if ($filtered == $original) {
         return false;
+    } else {
+        $strTest = $filtered;
+        return true;
     }
-    return true;
 }
 
 /**
@@ -1626,6 +1805,15 @@ function ageFromDate ($checkDate, $referenceDate = null) {
 // =================================================================
 // Session services: session functions deal with logged in users.
 // =================================================================
+
+/**
+ * Generate a time stamp for the current time rounded to the nearest SESSION_DAYSTAMP_HOURS hour.
+ * This is used for access tokens as they are short-lived.
+ * @return int
+ */
+function sessionDayStamp () {
+    return floor(time() / (SESSION_DAYSTAMP_HOURS * 60 * 60));
+}
 
 /**
  * Generate a (hopefully) unique site mark. This is a pseudo-user-id to accommodate anonymous users who
@@ -1806,6 +1994,24 @@ function getExtension ($fileName) {
 }
 
 /**
+ * Return a local file path to a resource given its URL.
+ * @param string $url any URL that should be valid on the current site.
+ * @return string A file path to that resource.
+ */
+function urlToFilePath ($url) {
+    if (empty($url)) {
+        $url = '/';
+    }
+    $urlParts = parse_url($url);
+    $urlPath = $urlParts['path'];
+    if ($urlPath[0] == '/') {
+        $urlPath = substr($urlPath, 1);
+    }
+    $filePath = SERVER_ROOT . $urlPath;
+    return $filePath;
+}
+
+/**
  * Generate a random string of base64 characters of the requested length. I have no
  * idea where this algorithm came from or how effective it is.
  * @param int $length
@@ -1858,9 +2064,108 @@ function showBooleanChecked($flag) {
     return $flag ? 'checked' : '';
 }
 
+/**
+ * Render a PHP key/value associative array into JavaScript code
+ * that produces a similar object.
+ * @param object The associated k/v array.
+ * @param string The name of the javascript variable to use. if not provided will default to "parameters".
+ */
+function arrayToJavaScriptObject ($parameters, $varName) {
+    if (empty($varName)) {
+        $varName = 'parameters';
+    }
+    $javaScriptCode = "const $varName = {\n";
+    foreach ($parameters as $property => $value) {
+        $javaScriptCode .= "        $property: \"$value\",\n";
+    }
+    $javaScriptCode .= "    };\n";
+    echo($javaScriptCode);
+}
+
+/**
+ * Pack a unique object identifier site-id, content-type-id, and object-id.
+ * The content id is a sequence of base 36 numbers, and we convert the base 36 characters to uppercase
+ * to maintain compatibility between PHP and MySQL.
+ * @param integer $site_id The object's site-id.
+ * @param integer $content_type_id The object's content type.
+ * @param integer $object_id The object identifier.
+ * @return string A content identifier.
+ */
+function contentIdPack($site_id, $content_type_id, $object_id) {
+    // @todo: should we verify $site_id, $content_type_id, $object_id are actually valid?
+    $site_id_str = base_convert($site_id, 10, 36);
+    $content_type_id_str = base_convert($content_type_id, 10, 36);
+    $object_id_str = base_convert($object_id, 10, 36);
+    $content_id = base_convert(strlen($site_id_str), 10, 36)
+        . base_convert(strlen($content_type_id_str), 10, 36)
+        . base_convert(strlen($object_id_str), 10, 36)
+        . $site_id_str
+        . $content_type_id_str
+        . $object_id_str
+        ;
+    return strtoupper($content_id);
+}
+
+/**
+ * Unpack a content identifier into it parts: site-id, content-type-id, and object-id.
+ * @param string $content_id A content identifier to unpack.
+ * @param integer $site_id The object's site-id.
+ * @param integer $content_type_id The object's content type.
+ * @param integer $object_id The object identifier.
+ * @return boolean True if successful ($content_id is valid), or false if not able to unpack.
+ */
+function contentIdUnpack($content_id, & $site_id, & $content_type_id, & $object_id) {
+    if (empty($content_id) || strlen($content_id) < 4) {
+        return false;
+    }
+    $index = 0;
+    $content_id = strtoupper($content_id);
+    $site_id_length = intval(substr($content_id, $index, 1), 36);
+    $index += 1;
+    $content_type_length = intval(substr($content_id, $index, 1), 36);
+    $index += 1;
+    $object_id_length = intval(substr($content_id, $index, 1), 36);
+    $index += 1;
+    if ($site_id_length < 1
+     || $content_type_length < 1
+     || $object_id_length < 1
+     || ($site_id_length + $content_type_length + $object_id_length != (strlen($content_id) - $index))) {
+        return false;
+    }
+    $site_id = intval(substr($content_id, $index, $site_id_length), 36);
+    $index += $site_id_length;
+    $content_type_id = intval(substr($content_id, $index, $content_type_length), 36);
+    $index += $content_type_length;
+    $object_id = intval(substr($content_id, $index, $object_id_length), 36);
+    return true;
+}
+
+/**
+ * Log a message to the logging utility.
+ * @param string Message to log.
+ */
 function debugLog($message) {
     global $enginesisLogger;
     $enginesisLogger->log($message, LogMessageLevel::Info, 'System');
+}
+
+/**
+ * Log an informational message to the logging utility.
+ * @param string Message to log.
+ */
+function debugInfo($message) {
+    global $enginesisLogger;
+    $enginesisLogger->log($message, LogMessageLevel::Info, 'System');
+}
+
+
+/**
+ * Log an error message to the logging utility.
+ * @param string Message to log.
+ */
+function debugError($message) {
+    global $enginesisLogger;
+    $enginesisLogger->log($message, LogMessageLevel::Error, 'System');
 }
 
 /**

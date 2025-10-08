@@ -3310,6 +3310,8 @@ export default {
                 }
                 if (isNull(hitData)) {
                     hitData = "";
+                } else {
+                    hitData = hitData.substring(0, 255);
                 }
                 if (enginesis.isBrowserBuild) {
                     // use Google Analytics or Tag Manager if it is there (send event, category, action, label, value)
