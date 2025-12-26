@@ -415,12 +415,17 @@ function setHTTPHeader() {
     if (headers_sent()) {
         return;
     }
+    global $ALLOWED_DOMAINS;
     $stage = serverStage();
     $domains = "https://" . ENGINESIS_SITE_KEY . "$stage.com https://enginesis$stage.com https://*.enginesis$stage.com https://enginesis." . ENGINESIS_SITE_KEY . "$stage.com";
+    if (! empty($ALLOWED_DOMAINS)) {
+        $domains .= ' ' . $ALLOWED_DOMAINS;
+    }
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
     header("Content-Security-Policy: *; img-src *;");
     header("Content-Security-Policy: default-src 'self' $domains;");
     header("Content-Security-Policy: worker-src 'self' $domains blob:;");
+
 }
 
 /**
