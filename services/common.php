@@ -425,7 +425,6 @@ function setHTTPHeader() {
     header("Content-Security-Policy: *; img-src *;");
     header("Content-Security-Policy: default-src 'self' $domains;");
     header("Content-Security-Policy: worker-src 'self' $domains blob:;");
-
 }
 
 /**

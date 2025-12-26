@@ -349,9 +349,10 @@ class LogMessage
      * Helper function to convert a parameters key/value array into a printable string.
      */
     public static function parametersToString($parameters) {
+        $doNotPassThruParameters = ['fn', 'state_seq', 'verified_developer_id', 'logged_in_user_id', 'password', 'secondary_password', 'refresh_token', 'authtok', 'authtoken', 'apikey', 'developer_key'];
         $parametersString = '';
         foreach ($parameters as $key => $value) {
-            if ($key == 'authtok' || strpos($key, 'password') !== false) {
+            if (in_array($key, $doNotPassThruParameters)) {
                 $value = 'XXXXXX';
             }
             if (is_array($value)) {
@@ -472,6 +473,15 @@ class LogMessage
     }
 
     /**
+     * Force any pending log messages to disk or final destination.
+     */
+    public function flush() {
+        if ($this->_isValid) {
+            //
+        }
+    }
+
+    /**
      * Immediately display a variable and a log message in the output stream.
      * @param any $variable A PHP variable to display.
      * @param string $message A message to give context to the debug reason.
@@ -481,9 +491,6 @@ class LogMessage
             $caller = debug_backtrace()[0];
             $message = 'From ' . basename($caller['file']) . ':' . $caller['line'];
         }
-        echo("<div><h3>$message</h3>");
-        echo '<pre>';
-        echo(var_export($variable, true));
-        echo '</pre></div>';
+        echo("<div><h3>Enginesis logImmediate</h3><pre>$message\n\n" . var_export($variable, true) . '</pre></div>');
     }
 }
