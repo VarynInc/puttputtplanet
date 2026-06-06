@@ -743,7 +743,6 @@ function getURLContents ($url, $get_params = null, $post_params = null, $headers
         }
         $page = curl_exec($ch);
         $curlError = curl_errno($ch);
-        curl_close($ch);
         if ($curlError != 0 || $page === false) {
             echo('Network error ' . $curlError . ': ' . curl_strerror($curlError) . ' requesting ' . $url);
             // the curl call itself failed, usually due to no network or SSL cert failure.
@@ -1107,7 +1106,7 @@ function randomString ($length, $maxCodePoint = 32, $reseed = false) {
     // create Random String: Calculates a random string based on a length given
     $chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-+:;<=>?@()[]{}!@#$%^&*-|_",.~`/\'\\';
     if ($reseed) {
-        mt_srand((double)microtime() * 9057254886133);
+        mt_srand((float)microtime() * 9057254886133);
     }
     $i = 0;
     $string = '';
@@ -2025,7 +2024,7 @@ function makeRandomToken ($length = 12) {
     $token = '';
     for ($i = 0; $i < $length; ++ $i) {
         if ($i % 2 == 0) {
-            mt_srand(time() % 2147 * 1000000 + (double) microtime() * 1000000);
+            mt_srand(time() % 2147 * 1000000 + (float) microtime() * 1000000);
         }
         $rand = 48 + mt_rand() % 64; // 48 is "0"
         if ($rand > 57) {

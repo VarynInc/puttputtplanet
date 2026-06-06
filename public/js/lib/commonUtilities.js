@@ -14,7 +14,7 @@
  */
 
 export default {
-    version: "1.7.5",
+    version: "1.7.8",
     _base64KeyStr: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
     _testNumber: 0,
 
@@ -159,7 +159,7 @@ export default {
             }
         } else {
             // all other value types can be represented with JSON.stringify
-            subObjects.push(JSON.stringify(object))
+            subObjects.push(JSON.stringify(object));
         }
         return subObjects.join(", ");
     },
@@ -174,8 +174,7 @@ export default {
      */
     queryStringToObject: function (urlParameterString) {
         const search = /([^&=]+)=?([^&]*)/g;
-        let match;
-        let result = {};
+        const result = {};
 
         function unescapeURI (uri) {
             return decodeURIComponent(uri.replace(/\+/g, " "));
@@ -188,6 +187,7 @@ export default {
         } else if (window) {
             urlParameterString = window.location.search.substring(1);
         }
+        let match;
         while (match = search.exec(urlParameterString)) {
             result[unescapeURI(match[1])] = unescapeURI(match[2]);
         }
@@ -464,13 +464,13 @@ export default {
                 "&": "&amp;",
                 "<": "&lt;",
                 ">": "&gt;",
-                '"': "&quot;",
+                "\"": "&quot;",
                 "'": "&#x27;",
                 "/": "&#x2F;"
             },
             htmlEscaper = /[&<>"'\/]/g;
         return ("" + string).replace(htmlEscaper, function (match) {
-            return htmlEscapeMap[match]
+            return htmlEscapeMap[match];
         });
     },
 
@@ -514,7 +514,7 @@ export default {
      *
      */
     isTouchDevice: function () {
-        if (window && (('ontouchstart' in window) || window.TouchEvent || (window.DocumentTouch && document instanceof DocumentTouch))) {
+        if (window && (("ontouchstart" in window) || window.TouchEvent || (window.DocumentTouch && document instanceof DocumentTouch))) {
             return true;
         }
         return false;
@@ -561,7 +561,7 @@ export default {
         audioTag.loop = false;
         audioTag.src = silence;
         document.addEventListener("visibilitychange", function () {
-            if (document.visibilityState == 'visible') {
+            if (document.visibilityState == "visible") {
                 audioTag.play();
             }
         });
@@ -657,10 +657,10 @@ export default {
             ctx.drawImage(this, 0, 0);
             dataURL = canvas.toDataURL("image/png");
             callback(dataURL);
-        }
+        };
         img.onerror = function() {
             callback(null);
-        }
+        };
     },
 
     /**
@@ -736,9 +736,9 @@ export default {
      */
     base64URLEncode: function (data) {
         return data
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/\=/g, '~');
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/\=/g, "~");
     },
 
     /**
@@ -749,9 +749,9 @@ export default {
      */
     base64URLDecode: function (data) {
         return data
-        .replace(/\-/g, '+')
-        .replace(/\_/g, '/')
-        .replace(/\~/g, '=');
+        .replace(/\-/g, "+")
+        .replace(/\_/g, "/")
+        .replace(/\~/g, "=");
     },
 
     /**
@@ -772,7 +772,7 @@ export default {
      * @return {ArrayBuffer} The binary representation of the base 64 string.
      */
     base64ToArrayBuffer: function(base64String) {
-        return Uint8Array.from(atob(base64String), function(char) { return char.charCodeAt(0) });
+        return Uint8Array.from(atob(base64String), function(char) { return char.charCodeAt(0); });
     },
 
     /**
@@ -793,8 +793,8 @@ export default {
             // it must contain only hex digits
             return null;
         }
-        let bytes = [];
-        let index = 0
+        const bytes = [];
+        let index = 0;
         for (; index < stringLength; index += 2) {
             bytes.push(parseInt(hexString.substring(index, index + 2), 16));
         }
@@ -835,8 +835,8 @@ export default {
         }
         const arrayLength = byteArray.length;
         const hexDigits = new Uint8Array(arrayLength * 2);
-        const alpha = 'a'.charCodeAt(0) - 10;
-        const digit = '0'.charCodeAt(0);
+        const alpha = "a".charCodeAt(0) - 10;
+        const digit = "0".charCodeAt(0);
         let p = 0;
         let nibble;
         for (let i = 0; i < arrayLength; i += 1) {
@@ -897,11 +897,6 @@ export default {
         if ( ! this.isBrowserEnvironment()) {
             return null;
         }
-
-        let expires;
-        let neverExpires;
-        let sameSite;
-
         if ( ! key || /^(?:expires|max\-age|path|domain|secure)$/i.test(key)) {
             // This is an invalid cookie key.
             return false;
@@ -909,9 +904,9 @@ export default {
         if (value === null || typeof value === "undefined") {
             return this.cookieRemove(key, path, domain);
         }
-        expires = "";
-        neverExpires = "expires=Fri, 31 Dec 9999 23:59:59 GMT";
-        sameSite = "samesite=lax";
+        let expires = "";
+        const neverExpires = "expires=Fri, 31 Dec 9999 23:59:59 GMT";
+        const sameSite = "samesite=lax";
         if (typeof isSecure === "undefined") {
             isSecure = true;
         }
@@ -1036,13 +1031,11 @@ export default {
         if ( ! this.isBrowserEnvironment()) {
             return null;
         }
-        let itemValueRaw;
-        let itemValueParsed;
-
         if (storageObject === undefined || storageObject == null) {
             storageObject = window.localStorage;
         }
-        itemValueRaw = storageObject.getItem(key);
+        const itemValueRaw = storageObject.getItem(key);
+        let itemValueParsed;
         if (itemValueRaw != null) {
             itemValueParsed = JSON.parse(itemValueRaw);
             if (itemValueParsed == null) {
@@ -1404,7 +1397,7 @@ export default {
         const tags = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
         const commentsAndPhpTags = /<!--[\s\S]*?-->|<\?(?:php)?[\s\S]*?\?>/gi;
         return input.replace(commentsAndPhpTags, "").replace(tags, function ($0, $1) {
-            return allowed.indexOf("<" + $1.toLowerCase() + ">") > -1 ? $0 : ""
+            return allowed.indexOf("<" + $1.toLowerCase() + ">") > -1 ? $0 : "";
         });
     },
 
@@ -1582,8 +1575,8 @@ export default {
      * @returns {String} The proposed host domain with the server removed.
      */
     domainDropServer: function(proposedHost) {
-        var targetHost = proposedHost ? proposedHost.toString() : "";
-        var pos = targetHost.indexOf("://"); // remove the protocol
+        let targetHost = proposedHost ? proposedHost.toString() : "";
+        let pos = targetHost.indexOf("://"); // remove the protocol
         if (pos > 0) {
             targetHost = targetHost.substring(pos + 3);
         }
@@ -1599,12 +1592,33 @@ export default {
         if (pos > 0) {
             targetHost = targetHost.substring(0, pos);
         }
-        var domainParts = targetHost.split(".");
+        const domainParts = targetHost.split(".");
         if (domainParts.length > 2) {
             domainParts.shift();
         }
-        targetHost = domainParts.join(".")
+        targetHost = domainParts.join(".");
         return targetHost;
+    },
+
+    /**
+     * Helper function to generate an array of 16 random bytes to be used as the
+     * initialization vector (IV) in our encryption functions. The same IV used to
+     * encrypt must be passed to decrypt, so the client who alls encrypt will need
+     * to save it and provide the same value to decrypt. The IV must only be used
+     * once per encrypt/decrypt pair.
+     * @returns {Uint8Array} Array of 16 random bytes.
+     */
+    generateEncryptIV: function() {
+        const numBytes = 16;
+        if (window.crypto) {
+            return window.crypto.getRandomValues(new Uint8Array(numBytes));
+        } else {
+            const randomValues = new Uint8Array(numBytes);
+            for (let i = 0; i < randomValues.length; i += 1) {
+                randomValues[i] = Math.floor(Math.random() * 255);
+            }
+            return randomValues;
+        }
     },
 
     /**
@@ -1654,9 +1668,9 @@ export default {
 
     /**
      * Decrypt a string that was encrypted with `encryptString()` and the matching key and iv.
-     * @param {string} encryptedData String of base-64 encoded data that was encrypted with key.
-     * @param {string} key Key must be hex digits represented as string "0123456789abcdef".
-     * @param {string} iv Initialization vector is a 16 byte string.
+     * @param {string} encryptedData String of base-64 encoded data that was encrypted with key and iv.
+     * @param {string} key Key must be hex digits represented as string "0123456789abcdef" that must match the key provided to encryptString.
+     * @param {string} iv Initialization vector is a 16 byte string that must match the IV string provided to encryptString.
      * @return {string} Original data.
      */
     decryptString: async function(encryptedData, key, iv) {
@@ -1702,7 +1716,7 @@ export default {
      */
     md5: function (s) {
         function L(k,d) {
-            return(k<<d)|(k>>>(32-d))
+            return(k<<d)|(k>>>(32-d));
         }
         function K(G,k) {
             var I,d,F,H,x;
@@ -1716,12 +1730,12 @@ export default {
         function q(d,F,k){
             return(d&k)|(F&(~k));
         }
-        function p(d,F,k){return(d^F^k)}
-        function n(d,F,k){return(F^(d|(~k)))}
-        function u(G,F,aa,Z,k,H,I){G=K(G,K(K(r(F,aa,Z),k),I));return K(L(G,H),F)}
-        function f(G,F,aa,Z,k,H,I){G=K(G,K(K(q(F,aa,Z),k),I));return K(L(G,H),F)}
-        function D(G,F,aa,Z,k,H,I){G=K(G,K(K(p(F,aa,Z),k),I));return K(L(G,H),F)}
-        function t(G,F,aa,Z,k,H,I){G=K(G,K(K(n(F,aa,Z),k),I));return K(L(G,H),F)}
+        function p(d,F,k){return(d^F^k);}
+        function n(d,F,k){return(F^(d|(~k)));}
+        function u(G,F,aa,Z,k,H,I){G=K(G,K(K(r(F,aa,Z),k),I));return K(L(G,H),F);}
+        function f(G,F,aa,Z,k,H,I){G=K(G,K(K(q(F,aa,Z),k),I));return K(L(G,H),F);}
+        function D(G,F,aa,Z,k,H,I){G=K(G,K(K(p(F,aa,Z),k),I));return K(L(G,H),F);}
+        function t(G,F,aa,Z,k,H,I){G=K(G,K(K(n(F,aa,Z),k),I));return K(L(G,H),F);}
         function e(G){
             var Z;var F=G.length;var x=F+8;var k=(x-(x%64))/64;var I=(k+1)*16;var aa=Array(I-1);var d=0;var H=0;
             while(H<F){
@@ -1772,4 +1786,4 @@ export default {
         var size = size || 80;
         return "https://www.gravatar.com/avatar/" + this.md5(email) + ".jpg?s=" + size;
     }
-}
+};

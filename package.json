@@ -1,55 +1,59 @@
 {
     "name": "puttputtplanet",
     "type": "module",
-    "version": "1.0.11",
+    "version": "1.0.12",
     "description": "Putt Putt Planet website",
     "main": "bin/build.js",
     "scripts": {
-      "build": "node bin/build.js",
-      "checkdiff": "bash ./bin/checkdiff.sh",
-      "clean": "rm -rf ./node_modules && rm -rf ./distrib && rm ./data/logs/*.log",
-      "deploy": "node bin/deploy.js --config=bin/deploy-config.json",
-      "lint": "npm exec -- eslint ./public/js/*.js",
-      "test": "jest test",
-      "updatedependencies": "node ../../libraries/npm-check-updates/build/cli.js -u",
-      "updatemodules": "node ./bin/updateModules.js",
-      "versionup": "node bin/versionUp.js --debug --task build --path ./"
+        "build": "node bin/build.js",
+        "checkdiff": "bash ./bin/checkdiff.sh",
+        "clean": "rm -rf ./node_modules && rm -rf ./distrib && rm ./data/logs/*.log",
+        "deploy": "node bin/deploy.js --config=bin/deploy-config.json",
+        "lint": "npm exec -- eslint ./public/js/*.js",
+        "test": "jest test",
+        "updatedependencies": "node ../../libraries/npm-check-updates/build/cli.js -u",
+        "ud": "node ../../libraries/npm-check-updates/build/cli.js -u",
+        "updatemodules": "node ./bin/updateModules.js",
+        "um": "node ./bin/updateModules.js",
+        "versionup": "node bin/versionUp.js --debug --task build --path ./",
+        "vu": "node bin/versionUp.js --debug --task build --path ./"
     },
     "repository": {
-      "type": "git",
-      "url": "git+https://github.com/VarynInc/puttputtplanet.git"
+        "type": "git",
+        "url": "git+https://github.com/VarynInc/puttputtplanet.git"
     },
     "keywords": [
-      "minigolf",
-      "website",
-      "javascript",
-      "games",
-      "fun",
-      "play"
+        "minigolf",
+        "website",
+        "javascript",
+        "games",
+        "fun",
+        "play"
     ],
     "author": "Varyn Inc.",
     "license": "ISC",
     "bugs": {
-      "url": "https://github.com/VarynInc/puttputtplanet/issues"
+        "url": "https://github.com/VarynInc/puttputtplanet/issues"
     },
     "homepage": "https://puttputtplanet.com",
     "devDependencies": {
-      "async": "^3.2.6",
-      "axios": "^1.15.2",
-      "chalk": "^5.6.2",
-      "cheerio": "^1.1.2",
-      "eslint": "^9.37.0",
-      "fs-extra": "^11.3.2",
-      "glob": "^11.1.0",
-      "gulp-rename": "^2.1.0",
-      "imagemin": "^9.0.1",
-      "jest": "^30.2.0",
-      "os": "^0.1.2",
-      "path": "^0.12.7",
-      "pretty-bytes": "^7.1.0",
-      "rsync": "^0.6.1",
-      "shelljs": "^0.10.0",
-      "terser": "^5.44.0",
-      "yargs": "^18.0.0"
+        "async": "^3.2.6",
+        "axios": "^1.16.1",
+        "chalk": "^5.6.2",
+        "cheerio": "^1.2.0",
+        "clean-css": "5.3.3",
+        "eslint": "^9.39.4",
+        "fs-extra": "^11.3.5",
+        "glob": "^11.1.0",
+        "gulp-rename": "^2.1.0",
+        "imagemin": "^9.0.1",
+        "jest": "^30.4.2",
+        "os": "^0.1.2",
+        "path": "^0.12.7",
+        "pretty-bytes": "^7.1.0",
+        "rsync": "^0.6.1",
+        "shelljs": "^0.10.0",
+        "terser": "^5.48.0",
+        "yargs": "^18.0.0"
     }
 }

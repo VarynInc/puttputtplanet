@@ -1760,10 +1760,12 @@ class Enginesis {
             $succeeded = $curlError == 0 && ($contents !== false && strlen($contents) > 0);
             if ( ! $succeeded) {
                 $errorInfo = 'System error: ' . $this->m_serviceEndPoint . ' replied with no data. cURL error ' . $curlError . ': ' . curl_error($ch);
+                if (isset($sslCertificate)) {
+                    $errorInfo .= " Verify CA cert $sslCertificate";
+                }
                 $this->debugCallback($errorInfo, __FILE__, __LINE__);
                 $contents = $this->makeErrorResponse(EnginesisErrors::SYSTEM_ERROR, $errorInfo, $parameters);
             }
-            curl_close($ch);
         } else {
             $errorInfo = 'System error: unable to contact ' . $this->m_serviceEndPoint . ' or the server did not respond.';
             $contents = $this->makeErrorResponse(EnginesisErrors::SYSTEM_ERROR, $errorInfo, $parameters);

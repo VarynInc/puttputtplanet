@@ -11,7 +11,7 @@
  **/
 
 const enginesis = {
-    VERSION: "2.12.5",
+    VERSION: "2.12.6",
     debugging: true,
     disabled: false, // use this flag to turn off communicating with the server
     isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -2201,6 +2201,27 @@ function _completeFileUpload(uploadAttributes, fileData) {
 }
 
 /**
+ * Helper function to generate an array of 16 random bytes to be used as the
+ * initialization vector (IV) in our encryption functions. The same IV used to
+ * encrypt must be passed to decrypt, so the client who alls encrypt will need
+ * to save it and provide the same value to decrypt. The IV must only be used
+ * once per encrypt/decrypt pair.
+ * @returns {Uint8Array} Array of 16 random bytes.
+ */
+function generateEncryptIV() {
+    const numBytes = 16;
+    if (window.crypto) {
+        return window.crypto.getRandomValues(new Uint8Array(numBytes));
+    } else {
+        const randomValues = new Uint8Array(numBytes);
+        for (let i = 0; i < randomValues.length; i += 1) {
+            randomValues[i] = Math.floor(Math.random() * 255);
+        }
+        return randomValues;
+    }
+}
+
+/**
  * Encrypt a string of data using the AES CBC algorithm. This is an asynchronous function
  * that returns a promise that will resolve with the encrypted data encoded in base-64,
  * or an exception. Failures are usually due to incorrect key format.
@@ -2357,6 +2378,16 @@ export default {
      */
     md5: function (string) {
         return md5(string);
+    },
+
+    /**
+     * Generate an initialization vector to be used with the encryption functions. The same IV
+     * supplied to encrypt must be provided to decrypt, and should only be used once per
+     * encrypt/decrypt pair.
+     * @returns Uint8Array An array of 16 random bytes.
+     */
+    generateRandomIV: function() {
+        return generateEncryptIV();
     },
 
     /**
