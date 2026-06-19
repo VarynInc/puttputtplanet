@@ -53,7 +53,7 @@ define('VIEWS_ROOT', $serverRootPath . 'views' . DIRECTORY_SEPARATOR);
 
 /**
  * Turn on or off all error reporting. Typically we want this on for development, off for production.
- * @param boolean True to turn on error reporting, false to turn it off.
+ * @param boolean $reportingFlag True to turn on error reporting, false to turn it off.
  * @return boolean The current setting of the error reporting flag.
  */
 function setErrorReporting ($reportingFlag) {
@@ -105,29 +105,37 @@ function reportError($msg, $file = '', $line = 0, $fn = '') {
     return $msg;
 }
 
-function dieIfNotLive($msg) {
+/**
+ * If the current process is not running on a production server, kill it.
+ * @param string $message A message to display if killing the current process.
+ */
+function dieIfNotLive($message) {
     global $enginesisLogger;
     if ( ! isLive()) {
         if ($enginesisLogger != null) {
-            $enginesisLogger->log("dieIfNotLive $msg", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
+            $enginesisLogger->log("dieIfNotLive $message", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
         }
-        echo $msg;
-        exit;
-    }
-}
-
-function dieIfLive($msg) {
-    global $enginesisLogger;
-    if (isLive()) {
-        if ($enginesisLogger != null) {
-            $enginesisLogger->log("dieIfLive $msg", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
-        }
-        echo $msg;
+        echo $message;
         exit;
     }
 }
 
 /**
+ * If the current process is running on a production server, kill it.
+ * @param string $message A message to display if killing the current process.
+ */
+function dieIfLive($message) {
+    global $enginesisLogger;
+    if (isLive()) {
+        if ($enginesisLogger != null) {
+            $enginesisLogger->log("dieIfLive $message", LogMessageLevel::Error, 'System', __FILE__, __LINE__);
+        }
+        echo $message;
+        exit;
+    }
+}
+
+/** ✅
  * Create a failed response for cases when we are going to fail locally without transaction
  * with the server.
  * @param string $errorCode The EnginesisErrors error code.
@@ -137,12 +145,12 @@ function dieIfLive($msg) {
  */
 function makeErrorResponse($errorCode, $errorMessage, $parameters) {
     $service = isset($parameters['fn']) ? $parameters['fn'] : 'UNKNOWN';
-    $stateSequence = isset($parameters['stateSeq']) ? $parameters['stateSeq'] : 0;
+    $stateSequence = isset($parameters['state_seq']) ? $parameters['state_seq'] : 0;
     $contents = '{"results":{"status":{"success":"0","message":"' . $errorCode . '","extended_info":"' . $errorMessage . '"},"passthru":{"fn":"' . $service . '","state_seq":' . $stateSequence . '}}}';
     return $contents;
 }
 
-/**
+/** ✅
  * Determine if the response looks like a valid Enginesis response.
  *
  * @param EnginesisResponse $enginesisResponse An EnginesisResponse object.
@@ -158,7 +166,7 @@ function isValidEnginesisResponse($enginesisResponse) {
 
 /**
  * Return the name of the page we are currently on.
- * @return string
+ * @return string A URL.
  */
 function currentPageName() {
     return basename($_SERVER['PHP_SELF'], '.php');
@@ -166,17 +174,18 @@ function currentPageName() {
 
 /**
  * Return the full URL of the page we are currently on.
+ * @return string A URL.
  */
 function currentPageURL() {
     return getServiceProtocol() . '://' . serverName() . $_SERVER['REQUEST_URI'];
 }
 
-/**
+/** ✅
  * Append a query parameter on to the end of a URL string. This helper function handles
  * the edge cases.
- * @param $url {string} The initial URL. Can be null or empty string.
- * @param $key {string} A key to add as a query parameter. Cannot be empty.
- * @param $value {string} The value for the key. Cannot be null.
+ * @param string $url The initial URL. Can be null or empty string.
+ * @param string $key A key to add as a query parameter. Cannot be empty.
+ * @param string $value The value for the key. Cannot be null.
  */
 function appendQueryParameter($url, $key, $value) {
     if ( ! empty($key) && $value !== null) {
@@ -198,18 +207,21 @@ function appendQueryParameter($url, $key, $value) {
     return $updatedURL;
 }
 
-/**
+/** ✅
  * Append all query parameters on to the end of a URL string. This helper function handles
  * the edge cases.
- * @param string The initial URL. Can be null or empty string.
- * @param string|object Either a query string (k=v&k=v) or an key/value object.
+ * @param string $url The initial URL. Can be null or empty string.
+ * @param string|object $keyValues Either a query string (k=v&k=v) or a key/value object.
  * @return string A URL with updated query string.
  */
 function appendQueryParameters($url, $keyValues) {
-    if (is_object($keyValues)) {
+    if (is_object($keyValues) || is_array($keyValues)) {
         $parameters = $keyValues;
     } elseif (is_string($keyValues)) {
+        $parameters = [];
         parse_str($keyValues, $parameters);
+    } else {
+        return $url;
     }
     $updatedURL = $url;
     foreach($parameters as $key => $value) {
@@ -218,7 +230,7 @@ function appendQueryParameters($url, $keyValues) {
     return $updatedURL;
 }
 
-/**
+/** ✅
  * Append a query parameter string on to the end of a URL string.
  * @param string $url The initial URL. Can be null or empty string.
  * @param string $parameters A string of parameters in the form k=v&k=v.
@@ -245,11 +257,11 @@ function appendQueryString($url, $parameters) {
     return $updatedURL;
 }
 
-/**
+/** ✅
  * Turn a key/value array into a query string with each parameter URL encoded.
  * For example it will return a=1&b=2 for the array ['a' => 1, 'b' => 2]
- * @param Array $parameters A key/value array of parameters.
- * @return String A URL query parameter string (without the leading '?')
+ * @param array $parameters A key/value array of parameters.
+ * @return string A URL query parameter string (without the leading '?')
  */
 function encodeURLParams ($parameters) {
     $encodedURLParams = '';
@@ -265,8 +277,14 @@ function encodeURLParams ($parameters) {
     return $encodedURLParams;
 }
 
+/** ✅
+ * Turn a query string with each parameter URL encoded into a key/value array.
+ * For example, for the string a=1&b=2 it will return an array ['a' => 1, 'b' => 2].
+ * @param string $encodedURLParams A URL query parameter string (without the leading '?')
+ * @return array A key/value array of parameters.
+ */
 function decodeURLParams ($encodedURLParams) {
-    $parameters = array();
+    $parameters = [];
     $urlParams = explode('&', $encodedURLParams);
     $i = 0;
     while ($i < count($urlParams)) {
@@ -281,6 +299,12 @@ function decodeURLParams ($encodedURLParams) {
     return $parameters;
 }
 
+/** ✅
+ * Convert a key/value array into a query string. If $parameters is null then it will return
+ * any parameters provided in teh current GET HTTP request.
+ * @param array|null $parameters A key/value array of parameters. If null will use the $_GET array.
+ * @return string Parameters converted to a query string.
+ */
 function saveQueryString ($parameters = null) {
     if ($parameters == null) {
         $parameters = $_GET;
@@ -288,6 +312,11 @@ function saveQueryString ($parameters = null) {
     return encodeURLParams($parameters);
 }
 
+/** ✅
+ * Convert unsafe characters into their XML entity representations. This is useful for safely embedding user-generated content into XML documents, such as RSS feeds.
+ * @param string $string The string to convert.
+ * @return string The converted string.
+ */
 function cleanXmlEntities ($string) {
     return str_replace(['&', '"', "'", '<', '>'], ['&amp;', '&quot;', '&apos;', '&lt;', '&gt;'], $string);
 }
@@ -385,7 +414,7 @@ function getPostInt ($varName, $defaultValue = 0) {
     return intval(getPostVar($varName, $defaultValue));
 }
 
-/**
+/** ✅
  * Return the HTTP header value for a specified header key. For example,
  * if the header set is "Authentication: Bearer token", then calling
  * getHTTPHeader('Authentication') should return "Bearer token".
@@ -427,7 +456,7 @@ function setHTTPHeader() {
     header("Content-Security-Policy: worker-src 'self' $domains blob:;");
 }
 
-/**
+/** ✅
  * Determine the origin of the request.
  * @return string Request origin.
  */
@@ -450,10 +479,10 @@ function getHTTPOrigin() {
     return $origin;
 }
 
-/**
+/** ✅
  * Return the referring client information. You can request just the referrer or a complete report
  * that includes origin and remote address separated with `|`.
- * @param boolean Set to true to return referrer, origin, and IP address of client. Set to false to only return the HTTP referer.
+ * @param boolean $completeReport Set to true to return referrer, origin, and IP address of client. Set to false to only return the HTTP referer.
  * @return string The referring client information.
  */
 function getHTTPReferrer($completeReport = true) {
@@ -464,7 +493,7 @@ function getHTTPReferrer($completeReport = true) {
     return $referrer;
 }
 
-/**
+/** ✅
  * Determine the IP address of the client making the request. We look at
  * several possible request header attributes and choose the first one
  * we come across.
@@ -490,14 +519,15 @@ function getHTTPClient() {
 }
 
 /**
- * processTrackBack: process a possible track back request when a page loads.
- * @param e: the event we are tracking, such as "Clicked Logo". While these are arbitrary, we should try to use
- *     the same value for the same event across all pages. Where are these id's documented?
- * @param u: the anonymous userId who generated the event.
- * @param: i: which newsletter this event came from.
+ * processTrackBack: process a possible track back request when a page loads. It depends on the Enginesis global object being available
+ * and it expects the following parameters to be posted or sent in the request:
+ *   e: the event we are tracking, such as "Clicked Logo". While these are arbitrary, we should try to use
+ *      the same value for the same event across all pages. Where are these id's documented?
+ *   u: the anonymous userId who generated the event.
+ *   i: which newsletter this event came from.
  *
  * This data gets recorded in the database to be processed later.
- *
+ * @requires $enginesis
  */
 function processTrackBack () {
     global $enginesis;
@@ -531,7 +561,7 @@ function processSearchRequest() {
     }
 }
 
-/**
+/** ✅
  * A function to look at a string and determine if it appears to be a URL, by
  * the patterns /, ./, http://, https://.
  * @param string $proposedURL A string to examine.
@@ -547,15 +577,15 @@ function looksLikeURLPattern($proposedURL) {
     return false;
 }
 
-/**
+/** ✅
  * Convert a string to a "slug". The result string can be used as a DOM id, a path part, or a safe string.
  * Rules:
  *   * Only allow A-Z, a-z, 0-9, dash, space.
  *   * Trim any leading or trailing space.
  *   * Only lowercase characters.
  *   * Max length 50.
- * @param $string
- * @return {string}
+ * @param string $string The string to convert.
+ * @return string The converted string.
  */
 function stringToSlug($string) {
     $separator = '-';
@@ -564,7 +594,7 @@ function stringToSlug($string) {
     return $sluggish;
 }
 
-/**
+/** ✅
  * Decode a base64 encoded string into its binary representation.
  * @param string $data A string of translated base-64 characters to translate back to binary.
  * @return string A binary string.
@@ -573,7 +603,7 @@ function base64Decode($data) {
     return base64_decode(base64URLDecode($data));
 }
 
-/**
+/** ✅
  * Replace base-64 chars that are not URL safe. This will help transmit a base-64 string
  * over the internet by translating '-_~' into '+/='.
  * @param string $data A string of translated base-64 characters to translate back to true base-64.
@@ -583,7 +613,7 @@ function base64URLDecode($data) {
     return strtr($data, ['-' => '+', '_' => '/', '~' => '=']);
 }
 
-/**
+/** ✅
  * Translate a string of data (possibly binary) into its base-64 representation. In
  * additions, this also makes the string URL safe by translating '+/=' into '-_~'.
  * Use `base64URLDecode` to get it back to true base-64.
@@ -594,7 +624,7 @@ function base64Encode($data) {
     return base64URLEncode(base64_encode($data));
 }
 
-/**
+/** ✅
  * Replace base-64 chars that are not URL safe. This will help transmit a base-64 string
  * over the internet by translating '+/=' into '-_~'.
  * @param string $data A string of base-64 characters to translate.
@@ -604,7 +634,7 @@ function base64URLEncode($data) {
     return strtr($data, ['+' => '-', '/' => '_', '=' => '~']);
 }
 
-/**
+/** ✅
  * Encrypt a string of data with a hexadecimal key using AES 256 CBC mode.
  * @param string $data A clear string of data to encrypt.
  * @param string $key The encryption key, represented as a string of at least 32 hexadecimal digits.
@@ -630,7 +660,7 @@ function encryptString($data, $key) {
     }
 }
 
-/**
+/** ✅
  * Decrypt a string of data that was encrypted with `encryptString()` using the same key.
  *
  * @param string $data An encrypted string of data to decrypt.
@@ -650,12 +680,12 @@ function decryptString($data, $key) {
     return openssl_decrypt($data, 'AES-256-CBC', $key, $sslOptions, $iv);
 }
 
-/**
+/** ✅
  * String obfuscator takes an input string and xor's it with a key. Call with a clear string to obfuscate, then
  * call again with the obfuscated string and the same key to return the original string.
- * @param $string
- * @param $key
- * @return string
+ * @param string $string The string to obfuscate.
+ * @param string $key The key to use for obfuscation.
+ * @return string The obfuscated string.
  */
 function xorString($string, $key) {
     $xorString = '';
@@ -667,12 +697,12 @@ function xorString($string, $key) {
     return $xorString;
 }
 
-/**
+/** ✅
  * Call this function to generate a password hash to save in the database instead of the password.
  * Generate random salt, can only be used with the exact password match.
  * This calls PHP's crypt function with the specific setup for blowfish. mcrypt is a required PHP module.
- * @param string the user's password
- * @return string the hashed password.
+ * @param string $password The user's password.
+ * @return string The hashed password.
  */
 function hashPassword ($password) {
     $chars = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -683,22 +713,22 @@ function hashPassword ($password) {
     return crypt($password, $salt);
 }
 
-/**
+/** ✅
  * Test a password and the user's stored hash of that password
- * @param string the user's password
- * @param string the password we looked up in the database
- * @return bool true if the password is a match. false if password does not match.
+ * @param string $password the user's password
+ * @param string $hashStoredInDatabase the password we looked up in the database
+ * @return boolean true if the password is a match. false if password does not match.
  */
 function verifyHashPassword ($password, $hashStoredInDatabase) {
     return ! empty($password) && ! empty($hashStoredInDatabase) && $hashStoredInDatabase == crypt($password, $hashStoredInDatabase);
 }
 
-/**
+/** ✅
  * Get any web page on the WWW and return its contents as a string
- * @param string is the URL to contact without any query string (use $get_params)
- * @param array GET parameters are key => value arrays
- * @param array POST parameters as a key => value array.
- * @param array Array of additional HTTP headers to set.
+ * @param string $url The URL to contact without any query string (use $get_params)
+ * @param array $get_params GET parameters are key => value arrays
+ * @param array $post_params POST parameters as a key => value array.
+ * @param array $headers Array of additional HTTP headers to set.
  * @return string|null the web page content as a string. Returns null if the request failed.
  */
 function getURLContents ($url, $get_params = null, $post_params = null, $headers = null) {
@@ -763,7 +793,7 @@ function getURLContents ($url, $get_params = null, $post_params = null, $headers
  * Verify the sever stage we are running on is sufficient to run Enginesis. There are a set of required
  * modules we need in order for the platform to operate. This function returns an array of either only
  * the failed tests, or the status of all tests.
- * @param $includePassedTests boolean set to false to return only failed tests, set to true to return
+ * @param boolean $includePassedTests set to false to return only failed tests, set to true to return
  *        both failed tests and passed tests. default is false.
  * @return array a key value array where the key is the test performed and the value is a boolean
  *        indicating the test passed (true) or the test failed (false).
@@ -846,7 +876,7 @@ function getCurrentDomain() {
     return getServiceProtocol() . '://' . domainForTargetStage(serverStage(), ENGINESIS_SITE_DOMAIN);
 }
 
-/**
+/** ✅
  * Return the name of the current site.
  * @return string Site name.
  */
@@ -866,11 +896,11 @@ function serverName () {
     return $serverName;
 }
 
-/**
+/** ✅
  * Return the domain name and TLD only (remove server name, protocol, anything else) e.g. this function
  * converts http://www.games.com into games.com or http://www.games-q.com into games-q.com
- * @param string $serverName
- * @return null|string
+ * @param string $serverName A URL or server domain string to consider.
+ * @return null|string Domain name.
  */
 function serverTail ($serverName = '') {
     $domain = '';
@@ -896,11 +926,11 @@ function serverTail ($serverName = '') {
     return $serverName;
 }
 
-/**
+/** ✅
  * Return the host domain only, removing bottom-level server name if it is there.
  * Turns www.enginesis.com into enginesis.com
- * @param $targetHost
- * @return string
+ * @param string $targetHost A host name to consider.
+ * @return string Domain name.
  */
 function domainDropServer ($targetHost) {
     $alteredHost = $targetHost;
@@ -925,30 +955,80 @@ function domainDropServer ($targetHost) {
 }
 
 /**
+ * Reconstruct a parsed URL from parse_url().
+ * @param array $URLParts The result from calling parse_url().
+ * @return string The reconstructed URL made from $URLParts.
+ */
+function unparse_url($URLParts) {
+    if (is_array($URLParts)) {
+        $scheme   = isset($URLParts['scheme']) ? $URLParts['scheme'] . '://' : '';
+        $host     = isset($URLParts['host']) ? $URLParts['host'] : '';
+        $port     = isset($URLParts['port']) ? ':' . $URLParts['port'] : '';
+        if (isset($URLParts['user']) || isset($URLParts['pass'])) {
+            $user  = isset($URLParts['user']) ? $URLParts['user'] : '';
+            $user .= isset($URLParts['pass']) ? ':' . $URLParts['pass']  : '';
+            $user .= "@";
+        } else {
+            $user = '';
+        }
+        $path     = isset($URLParts['path']) ? $URLParts['path'] : '';
+        $query    = isset($URLParts['query']) ? '?' . $URLParts['query'] : '';
+        $fragment = isset($URLParts['fragment']) ? '#' . $URLParts['fragment'] : '';
+        return "$scheme$user$host$port$path$query$fragment";
+    } else {
+        return $URLParts;
+    }
+}
+
+/**
  * Transform the host name into the matching stage-qualified host name requested. For example, if we are currently on
  * www.enginesis-q.com and the $targetStage is -l, return www.enginesis-l.com.
- * @param string $targetStage one of -l, -d, -x, -q, or '' for live.
- * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain, not a URL.
- * @return string The qualified host name.
+ *
+ * @param string $targetStage one of -l, -d, -x, -q or '' for live.
+ * @param string|null $hostName A host name to check, or if not provided then the current host. This is a domain or a URL.
+ * @return string The requalified host name.
  */
 function domainForTargetStage($targetStage, $hostName = null) {
     if (empty($hostName)) {
         $hostName = serverName();
     }
-    // find the tld
-    $lastDot = strrpos($hostName, '.');
-    if ($lastDot === false) {
-        // no .tld!
-        $domain = $hostName;
-    } else {
-        $domain = substr($hostName, 0, $lastDot);
-        $tld = substr($hostName, $lastDot + 1);
-        $domain = preg_replace('/-[ldqx]$/', '', $domain) . $targetStage . '.' . $tld;
+    if ($targetStage == '*') {
+        $targetStage = serverStage(null);
+    } elseif (strlen($targetStage) == 1) {
+        $targetStage = '-' . $targetStage;
     }
-    return $domain;
+    if ( ! in_array($targetStage, ['-l', '-d', '-q', '-x', ''])) {
+        // Not a supported stage, we should not even try.
+        return $hostName;
+    }
+    $URLParts = parse_url($hostName);
+    if (is_array($URLParts)) {
+        if (empty($URLParts['host']) && ! empty($URLParts['path'])) {
+            $URLParts['host'] = $URLParts['path'];
+            $URLParts['path'] = '';
+        }
+        if (preg_match('/-[ldqx]\./i', $URLParts['host'], $matchedStage)) {
+            // If the source host name has a stage identifier, then just transform it to the target stage.
+            $URLParts['host'] = preg_replace('/-[ldqx]\./', $targetStage . '.', $URLParts['host']);
+        } elseif ($targetStage != '') {
+            // If the target stage is live and the host name is live, we don't need to do anything.
+            // Otherwise, insert the new target stage into the host name.
+            $domainParts = explode('.', $URLParts['host']);
+            $partCount = count($domainParts);
+            if ($partCount > 1) {
+                $stage = $domainParts[$partCount - 2] . $targetStage;
+                $domainParts[$partCount - 2] = $stage;
+                $URLParts['host'] = implode('.', $domainParts);
+            }
+        }
+        $result = unparse_url($URLParts);
+    } else {
+        $result = $hostName;
+    }
+    return $result;
 }
 
-/**
+/** ✅
  * Parse the given host name to determine which stage we are currently running on.
  * @param string $hostName Host name or domain name to parse. If null we try the current `serverName()`.
  * @return string the -l, -d, -q, -x part, or '' for live.
@@ -966,9 +1046,25 @@ function serverStage($hostName = '') {
 }
 
 /**
+ * Determine if the given environment stage specifier is valid.
+ * We only accept -l (localhost), -d (dev), -q (QA), -x (external), or '' for live/production.
+ *
+ * @param string $stage The stage specifier to test.
+ * @return boolean True if valid, false if not valid.
+ */
+function isValidServerStage($stage) {
+    if ($stage === '') {
+        return true;
+    } elseif (empty($stage)) {
+        return false;
+    }
+    return preg_match('/^-[ldqx]$/i', $stage) === 1;
+}
+
+/** ✅
  * Returns true if we are on a testing stage - either -l or -d.
  * @param null $serverStage
- * @return bool
+ * @return boolean True if running on a test stage.
  */
 function isTestServerStage ($serverStage = null) {
     if ($serverStage === null) {
@@ -977,79 +1073,125 @@ function isTestServerStage ($serverStage = null) {
     return $serverStage == '-l' || $serverStage == '-d';
 }
 
-/**
+/** ✅
  * Fix the input string to match the current stage we are on. E.g. if we are given http://www.enginesis.com/index.php
- * and we are currently running on -l, then return http://www.enginesis-l.com/index.php.
- * @param $targetFile
- * @return string
+ * and we are currently running on -l, then return http://www.enginesis-l.com/index.php. if we are given
+ * http://enginesis-q.com/index.php and we are currently running on -l, then return http://enginesis-l.com/index.php.
+ * @param string $targetFile The file path to adjust.
+ * @return string The adjusted file path.
  */
 function serverStageMatch ($targetFile) {
-    $whichEnv = serverStage(); // determine which server we are running on, from -l, -q, -d or live
-    if ($whichEnv != '') { // we need to set the correct server environment
-        $protocolStr = '';
-        $targetURL = $targetFile;
-        $pos = strpos($targetURL, '//'); // get the protocol. This could be // or http:// or https://
-        if ($pos > 0) {
-            $protocolStr = substr($targetURL, 0, $pos + 2);
-            $targetURL = substr($targetURL, $pos + 2);
+    if (empty($targetFile)) {
+        return $targetFile;
+    }
+    $targetStage = serverStage(); // determine which server we are running on, from -l, -q, -d or live
+    $URLParts = parse_url($targetFile);
+    if (empty($URLParts['host']) && ! empty($URLParts['path'])) {
+        $URLParts['host'] = $URLParts['path'];
+        $URLParts['path'] = '';
+    }
+    $domain = $URLParts['host'];
+    $domainParts = explode('.', $domain);
+    $domainPartCount = count($domainParts);
+    if ($domainPartCount > 1) {
+        $domainStr = $domainParts[$domainPartCount - 2];
+    } else {
+        $domainStr = $domain;
+    }
+    if ( ! empty($domainStr)) {
+        // remove any -?. and replace it with
+        $newDomain = preg_replace('/-[ldqx]$/', $targetStage, $domainStr);
+        if ($newDomain == $domainStr && $targetStage != '') {
+            $newDomain .= $targetStage;
         }
-        $firstSlash = strpos($targetURL, '/'); // save everything after the domain
-        if ($firstSlash > 0) {
-            $urlPath = substr($targetURL, $firstSlash);
-            $domainStr = substr($targetURL, 0, $firstSlash);
+        if ($domainPartCount > 1) {
+            $domainParts[$domainPartCount - 2] = $newDomain;
+            $domain = implode('.', $domainParts);
         } else {
-            $urlPath = '';
-            $domainStr = $targetURL;
+            $domain = $newDomain;
         }
-        $domainStr = strtolower($domainStr);
-        if (strtolower(serverName()) != strtolower($domainStr)) {
-            $lastDot = strrpos($domainStr, '.'); // now fix the domain to match the current server stage
-            if ($lastDot >= 0) {
-                $domainStr = substr($domainStr, 0, $lastDot) . $whichEnv . substr($domainStr, $lastDot);
-            }
-        }
-        $targetFile = $protocolStr . $domainStr . $urlPath;
-    } else { // We are on live. Does the input string have a stage specification in it? if so, take it out.
-        // preg_match( /-[l|d|q|x]\./ )
+        $URLParts['host'] = $domain;
+    }
+    $targetFile = '';
+    if ( ! empty($URLParts['scheme'])) {
+        $targetFile .= $URLParts['scheme'] . '://';
+    }
+    if ( ! empty($URLParts['host'])) {
+        $targetFile .= $URLParts['host'];
+    }
+    // port, user, pass
+    if ( ! empty($URLParts['path'])) {
+        $targetFile .= $URLParts['path'];
+    }
+    if ( ! empty($URLParts['query'])) {
+        $targetFile .= '?' . $URLParts['query'];
+    }
+    if ( ! empty($URLParts['fragment'])) {
+        $targetFile .= '#' . $URLParts['fragment'];
     }
     return $targetFile;
 }
 
+/**
+ * Return the host domain only, removing bottom-level server name if it is there.
+ * Turns www.enginesis.com into enginesis.com, or if running on -q, turns www.enginesis.com into enginesis-q.com
+ * @param string $targetHost A domain or host name or URL.
+ * @return string Domain.
+ */
 function domainStageMatchDropServer ($targetHost) {
-    // return the host domain only, removing bottom-level server name if it is there.
-    // Turns www.enginesis.com into enginesis.com, or if running on -q, turns www.enginesis.com into enginesis-q.com
-
-    $whichEnv = serverStage(); // determine which server we are running on, from -l, -q, -d or live
-    $alteredHost = $targetHost;
-    $pos = strpos($alteredHost, '://'); // remove the protocol
-    if ($pos > 0) {
-        $alteredHost = substr($alteredHost, $pos + 3);
+    // determine which server we are running on, from -l, -q, -d or live
+    $currentStage = serverStage();
+    $URLParts = parse_url($targetHost);
+    if (empty($URLParts['host']) && ! empty($URLParts['path'])) {
+        $URLParts['host'] = $URLParts['path'];
+        $URLParts['path'] = '';
     }
-    $firstSlash = strpos($alteredHost, '/'); // remove everything after the domain
-    if ($firstSlash > 0) {
-        $alteredHost = substr($alteredHost, 0, $firstSlash);
-    }
-    $domainParts = explode('.', $alteredHost);
-    if (count($domainParts) > 2) {
-        $alteredHost = $domainParts[1] . $whichEnv;
-        for ($i = 2; $i < count($domainParts); $i ++) {
-            $alteredHost .= '.' . $domainParts[$i];
+    $domainParts = explode('.', $URLParts['host']);
+    $domainPartsCount = count($domainParts);
+    $alteredHost = '';
+    if ($domainPartsCount > 2) {
+        // domain consists of more than 2 parts, drop the first and correct the stage
+        $stageHostCount = $domainPartsCount - 2;
+        if (preg_match('/-[ldqx]$/', $domainParts[$stageHostCount]) === 1) {
+            $domainParts[$stageHostCount] = preg_replace('/-[ldqx]$/', $currentStage, $domainParts[$stageHostCount]);
+        } else {
+            $domainParts[$stageHostCount] .= $currentStage;
         }
-    } elseif (count($domainParts) == 2) {
-        $alteredHost = $domainParts[0] . $whichEnv . '.' . $domainParts[1];
+        for ($i = 1; $i < $domainPartsCount; $i ++) {
+            $alteredHost .= (strlen($alteredHost) > 0 ? '.' : '') . $domainParts[$i];
+        }
+    } elseif ($domainPartsCount == 2) {
+        // domain consists of only 2 parts, correct the first and assume the second is the TLD.
+        $alteredHost = preg_replace('/-[ldqx]$/', $currentStage, $domainParts[0]) . '.' . $domainParts[1];
+    } else {
+        // Not a valid domain (or something like localhost), we cannot adjust this.
+        $alteredHost = $targetHost;
     }
     return $alteredHost;
 }
 
+/**
+ * Determine if we are running on a production server.
+ * @return boolean True if running on a production server.
+ */
 function isLive() {
     return serverStage() == '';
 }
 
+/** ✅
+ * Return the path on disk of the location of the site data folder.
+ * This folder is not shared on the live servers. Use for server specific data (such as log files).
+ * @return string File path.
+ */
 function serverDataFolder() {
-    // This folder is not shared on the live servers. Use for server specific data (such as log files)
     return SERVER_DATA_PATH . 'enginesis' . DIRECTORY_SEPARATOR;
 }
 
+/**
+ * Return the HTTP protocol of the current page or service call.
+ * @param boolean $return_full_protocol If true, return with `://`.
+ * @return string Current request protocol (e.g. https or https://)
+ */
 function getServerHTTPProtocol ($return_full_protocol = true) {
     $serverProtocol = getServiceProtocol();
     if ($return_full_protocol) {
@@ -1064,8 +1206,8 @@ function getServerHTTPProtocol ($return_full_protocol = true) {
  * considered optional and are only sent to the service if a value is provided.
  * @param string $fn The service to call.
  * @param integer $site_id The site-id.
- * @param Array An array of key/values to send to the service.
- * @return Array A complete and clean array of parameters to send to the service.
+ * @param array $parameters An array of key/values to send to the service.
+ * @return array A complete and clean array of parameters to send to the service.
  */
 function enginesisParameterObjectMake ($fn, $site_id, $parameters) {
     global $sync_id;
@@ -1087,9 +1229,14 @@ function enginesisParameterObjectMake ($fn, $site_id, $parameters) {
     return $serverParams;
 }
 
-function gameParameterStringMake ($result_array) {
+/**
+ * Convert a key/value array into a URL query string.
+ * @param array $resultArray A key/value array.
+ * @return string A query string.
+ */
+function gameParameterStringMake ($resultArray) {
     $resultStr = '';
-    foreach($result_array as $fieldname => $fielddata) {
+    foreach($resultArray as $fieldname => $fielddata) {
         if (strlen($resultStr) > 0) {
             $resultStr .= '&';
         }
@@ -1098,12 +1245,38 @@ function gameParameterStringMake ($result_array) {
     return($resultStr);
 }
 
+/** ✅
+ * Craft a game key from site_id + game_id. Use this function to ensure a unique game reference that
+ * is intended for a specific site.
+ * @param integer $site_id Which site.
+ * @param integer $game_id Which game.
+ * @return string Game key.
+ */
 function gameKeyMake ($site_id, $game_id) {
     return md5(COREG_TOKEN_KEY . $site_id . $game_id);
 }
 
+
+/** ✅
+ * Create a hard-to-guess object key. This is to help obfuscate accessing
+ * objects with public APIs using easy to guess identifies (such as user_id=1000).
+ * This value should be used instead of the internal primary-key whenever the object
+ * will be accessed from a public API.
+ * @param integer Internal object identifier.
+ * @return string Public object identifier.
+ */
+function secureObjectIdMake ($objectId) {
+    $randomSalt = randomString(4, 62);
+    return $randomSalt . md5(COREG_TOKEN_KEY . $objectId . $randomSalt);
+}
+
+/** ✅
+ * create Random String: Calculates a random string based on a length given and character set.
+ * @param integer $length How many characters is the result string.
+ * @param integer $maxCodePoint (10-96) How many code points to use in the character set. 10=numbers only, 36=number and upper case, 62=numbers, upper and lower case, 96=numbers, upper and lower case, and symbols.
+ * @return string A random string of $length characters.
+ */
 function randomString ($length, $maxCodePoint = 32, $reseed = false) {
-    // create Random String: Calculates a random string based on a length given
     $chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-+:;<=>?@()[]{}!@#$%^&*-|_",.~`/\'\\';
     if ($reseed) {
         mt_srand((float)microtime() * 9057254886133);
@@ -1182,7 +1355,7 @@ function verifySessionIsValid($userId, $authToken) {
     return true;
 }
 
-/**
+/** ✅
  * Search $text for tokens in the form %#% and replace them with their respective function arguments.
  * Counting starts at 1 (because $text is item 0) and we expect to find at least as many function arguments
  * as there are references in $text. Example:
@@ -1227,9 +1400,9 @@ function tokenReplace ($text, $parameters) {
 }
 
 /**
- * Convert an array into a string.
- * @param Array $array
- * @return string
+ * Convert an array into a string without deep inspection.
+ * @param array $array An array to consider.
+ * @return string Input array as a string.
  */
 function arrayToString ($array) {
     if (isset($array) && is_array($array)) {
@@ -1242,9 +1415,9 @@ function arrayToString ($array) {
 /**
  * Copy a key/value in the source array to the target if it does not already exist in the target array. Use the
  * force parameter to force the copy and overwrite the target value.
- * @param $source Array The source array to copy a key/value from.
- * @param $target Array the target array to copy the key/value to.
- * @param $key String The key to copy.
+ * @param array $source The source array to copy a key/value from.
+ * @param array $target The target array to copy the key/value to.
+ * @param string $key The key to copy.
  * @param bool $force Set to true to force the value to the target if it exists or not.
  * @return bool true if a copy was done, false if no copy was done.
  */
@@ -1260,11 +1433,11 @@ function copyArrayKey($source, & $target, $key, $force = false) {
     return $copied;
 }
 
-/**
+/** ✅
  * Determine if a variable is considered empty. This goes beyond PHP empty() function to support SQL and JavaScript
  * possibilities.
  *
- * @param any $value A variable to test for emptiness.
+ * @param mixed $value A variable to test for emptiness.
  * @return boolean True if considered empty, false if considered not empty.
  */
 function isEmpty ($value) {
@@ -1283,11 +1456,11 @@ function isEmpty ($value) {
     }
 }
 
-/**
+/** ✅
  * Determine if a string begins with a specific string. This does exact match so it is case sensitive.
  *
- * @param string The string to search against.
- * @param string|array The string to search for in $haystack.
+ * @param string $haystack The string to search against.
+ * @param string|array $needle The string to search for in $haystack.
  * @return boolean true if $haystack starts with $needle.
  */
 function startsWith($haystack, $needle) {
@@ -1303,11 +1476,11 @@ function startsWith($haystack, $needle) {
     }
 }
 
-/**
+/** ✅
  * Determine if a string ends with a specific string.
  *
- * @param string String to consider.
- * @param string|array What to match in $haystack.
+ * @param string $haystack String to consider.
+ * @param string|array $needle What to match in $haystack.
  * @return boolean true if $haystack ends with $needle.
  */
 function endsWith($haystack, $needle) {
@@ -1323,9 +1496,9 @@ function endsWith($haystack, $needle) {
     }
 }
 
-/**
+/** ✅
  * Transform a string into a safe to show inside HTML string. Unsafe HTML chars are converted to their escape equivalents.
- * @param string A string to transform.
+ * @param string $string A string to transform.
  * @return string The transformed string.
  */
 function safeForHTML ($string) {
@@ -1348,11 +1521,11 @@ function safeForHTML ($string) {
     return preg_replace($htmlEscapePattern, $htmlEscapeMap, $string);
 }
 
-/**
+/** ✅
  * Determine if a string has any single character of a string of select characters.
  *
  * @param string $string string to check
- * @param string|Array $selectChars string of individual characters to check if contained in $string.
+ * @param string|array $selectChars string of individual characters to check if contained in $string.
  *     If an array of strings, checks each string to determine if the entire string (case sensitive) is contained in $string.
  * @param int $start start position in $string to begin checking, default is the beginning.
  * @param int $length ending position in $string to stop checking, default is the end.
@@ -1383,7 +1556,7 @@ function str_contains_char ($string, $selectChars, $start = 0, $length = 0) {
     return false;
 }
 
-/**
+/** ✅
  * Find the earliest numeric position of any one of a set of substrings in a string. If more than one is found
  *   in target string then the occurrence with the smallest numeric position is returned. false is returned if
  *   none of the substrings are found.
@@ -1407,17 +1580,17 @@ function strpos_array ($haystack, $needles, $offset = 0) {
 
 /**
  * Convert a boolean value to a string.
- * @param $variable
- * @return string
+ * @param mixed $variable A scalar to consider as a boolean value.
+ * @return string True if $variable is coerced to true, otherwise false.
  */
 function boolToString($variable) {
     return $variable ? 'true' : 'false';
 }
 
-/**
+/** ✅
  * Convert a value to its boolean representation.
- * @param any $variable - any type will be coerced to a boolean value.
- * @return boolean
+ * @param mixed $variable any type will be coerced to a boolean value.
+ * @return boolean boolean representation of $variable.
  */
 function valueToBoolean($variable) {
     if (is_string($variable)) {
@@ -1431,7 +1604,7 @@ function valueToBoolean($variable) {
     return $result;
 }
 
-/**
+/** ✅
  * Convert an integer value to its boolean representation. A value is considered true
  * if it is not 0.
  *
@@ -1442,7 +1615,7 @@ function castIntToBool ($value) {
     return castValueToBool($value);
 }
 
-/**
+/** ✅
  * Convert a value to its boolean representation. A value is considered true
  * if it is "true|t|yes|y|1" or evaluates to a true value, such as a non-0 integer.
  *
@@ -1458,11 +1631,11 @@ function castValueToBool ($value) {
     }
 }
 
-/**
+/** ✅
  * Convert a boolean value to an integer representation. Typically we need this for the database as we only save
  * 1 or 0.
- * @param $value
- * @return int
+ * @param mixed $value A value to interpret as a boolean value.
+ * @return integer 1 if $value is coerced to true, otherwise false.
  */
 function castBoolToInt ($value) {
     if (is_string($value)) {
@@ -1491,8 +1664,8 @@ function castBoolToString($value, $trueValue = 'true', $falseValue = 'false') {
 
 /**
  * Determine if a given value is something we an take to be a boolean value.
- * @param $value int|string must be scalar int or string
- * @return bool
+ * @param mixed $value must be scalar value to coerce to a boolean.
+ * @return boolean $value coerced to either true or false.
  */
 function isValidBool($value) {
     if (is_integer($value)) {
@@ -1505,39 +1678,39 @@ function isValidBool($value) {
 
 /**
  * Determine if the id is a valid id for a database object. That typically means the id cannot be 0, null, or negative.
- * @param $id int expected otherwise implicitly cast to int.
- * @return bool
+ * @param integer $id expected otherwise implicitly cast to int.
+ * @return boolean True if $id is considered valid in format.
  */
 function isValidId($id) {
     return $id !== null && $id > 0;
 }
 
-/**
+/** ✅
  * Performs basic user name validation. A user name must be between 3 and 20 characters
  *   and we only accept certain characters (a-z, 0-9,_ - . $ @ ! | ~. Note that a user name may contain
  *   only digits, and then we have to decide if it is a user name or a user-id.
- * @param string The user name to check.
- * @return bool true if acceptable otherwise false.
+ * @param string $userName The user name to check.
+ * @return boolean true if acceptable otherwise false.
  */
 function isValidUserName ($userName) {
     $len = strlen(trim($userName));
     return $len == strlen($userName) && preg_match('/^[a-zA-Z0-9_@!~\$\.\-\|\s]{3,20}$/', $userName) === 1;
 }
 
-/**
+/** ✅
  * Remove and bad chars from a proposed user name.
- * @param $userName string The user name to clean up
+ * @param string $userName The user name to clean up
  * @return string the clean user name
  */
 function cleanUserName ($userName) {
     return preg_replace('/\s+/', ' ', preg_replace('/[^a-zA-Z0-9_@!~\$\.\-\|\s]/', '', trim($userName)));
 }
 
-/**
+/** ✅
  * Performs basic user password validation. The password can be any printable characters between 8 and 32 in length
  * with no leading or trailing spaces.
  * @param string $password The password to check.
- * @return bool true if acceptable otherwise false.
+ * @return boolean true if acceptable otherwise false.
  */
 function isValidPassword ($password) {
     if (empty($password)) {
@@ -1549,15 +1722,15 @@ function isValidPassword ($password) {
     return $len == strlen($password) && ctype_graph($password) && $len >= $minPasswordLength && $len <= $maxPasswordLength;
 }
 
-/**
+/** ✅
  * Make sure a proposed gender value is valid. THis is intended to be used to validate forms and user input and make
  * certain we have a value our system can deal with.
- * @param $gender {string} a proposed value for gender, either a single character M, F, or N, or a word Male, Female, or Neutral.
+ * @param string $gender a proposed value for gender, either a single character M, F, or N, or a word Male, Female, or Neutral.
  * @return string One of the gender setting we will accept.
  * @todo: This should be localized, so move the possible names table into a lookup table.
  */
 function validateGender ($gender) {
-    $validGenders = array('Male', 'Female', 'Neutral');
+    $validGenders = ['Male', 'Female', 'Neutral'];
     $gender = trim($gender);
     if (strlen($gender) == 1) {
         $gender = strtoupper($gender);
@@ -1573,7 +1746,7 @@ function validateGender ($gender) {
     return $gender;
 }
 
-/**
+/** ✅
  * Given an email address test to see if it appears to be valid.
  * @param string $email an email address to check
  * @return bool true if we think the email address looks valid, otherwise false.
@@ -1582,7 +1755,7 @@ function checkEmailAddress ($email) {
     return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
 }
 
-/**
+/** ✅
  * Clean extended characters out of the string. This helps sanitize strings for general
  * display cases. For example, clean up a Microsoft Word copyied string for more general
  * usage. Extended characters converted to their common ascii equivalent.
@@ -1609,18 +1782,23 @@ function cleanString ($input) {
     return preg_replace($search, $replace, $input);
 }
 
-/**
+/** ✅
  * Remove non-ASCII extended characters, remove new lines, strip HTML tags, convert HTML to entities,
- * and trim leading and trailing white space.
+ * and trim leading and trailing white space. Optionally truncate the string to a specified length.
  *
  * @param string $source The string to clean.
+ * @param integer $maxLength If greater than 0, the string is also truncated to this length.
  * @return string The source string cleaned of all bad characters.
  */
-function fullyCleanString($source) {
-    return htmlspecialchars(trim(str_replace("\n", '', strip_tags(cleanString($source)))));
+function fullyCleanString($source, $maxLength = 0) {
+    $cleaned = htmlspecialchars(trim(str_replace("\n", '', strip_tags(cleanString($source)))));
+    if ($maxLength > 0) {
+        $cleaned = substr($cleaned, 0, $maxLength);
+    }
+    return $cleaned;
 }
 
-/**
+/** ✅
  * Clean a proposed file name of any undesired characters and return a nice file name.
  *
  * @param string $fileName A proposed file name.
@@ -1633,7 +1811,35 @@ function cleanFileName ($fileName) {
     return str_replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|', '`', '\''], '', $fileName);
 }
 
-/**
+/** ✅
+ * Determine if a proposed file name is considered valid. For Enginesis, this means a file name only (no path), no spaces,
+ * up to 50 characters, and no invalid characters such as \ / : * ? " < > | ` ', and optionally that the file name has
+ * an allowed extension.
+ * @param string $fileName A proposed file name to validate.
+ * @param array $extensions An optional array of allowed file extensions.
+ * @return boolean true if the file name is considered valid, otherwise false if invalid.
+ */
+function isValidFileName ($fileName, $extensions = []) {
+    if ( ! is_string($fileName)) {
+        return false;
+    }
+    if (strlen($fileName) == 0 || strlen($fileName) > 50) {
+        return false;
+    }
+    $invalidCharacters = ' |\'\\?*&<";:>+[]=/';
+    if (strpbrk($fileName, $invalidCharacters) !== false) {
+        return false;
+    }
+    if ( ! empty($extensions)) {
+        $extension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+        if ( ! in_array($extension, $extensions)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** ✅
  * Strip HTML tags and javascript handlers from the source string.
  *
  * @param string $source A source string to clean of any HTML tags.
@@ -1650,7 +1856,7 @@ function stripTagsAttributes ($source, $allowedTags = [], $disabledAttributes = 
     }
 }
 
-/**
+/** ✅
  * Filter bad or undesirable words from a proposed string.
  * @todo: This needs work it doesn't seem to be all that useful.
  *
@@ -1672,7 +1878,7 @@ function profanityFilter ( & $strTest) {
     }
 }
 
-/**
+/** ✅
  * In order to provide some flexibility with dates, our API will accept a PHP date, a Unix timestamp,
  * a date string, or null. This function will try to figure our what date was provided and convert what ever
  * it is into a valid MySQL date string. If null it returns the current date-time.
@@ -1745,6 +1951,34 @@ function HumanDateToMySQLDate ($humanDate) {
     return $dateParts[2] . '-' . $dateParts[0] . '-' . $dateParts[1] . ' 00:00:00';
 }
 
+/** ✅
+ * Determine if a string is a valid MySQL date string in the form YYYY-mm-dd.
+ * @param string $date A string to test.
+ * @return boolean true if the string is a valid MySQL date string in the form YYYY-mm-dd, otherwise false.
+ */
+function isValidMySQLDate($date) {
+    if (empty($date)) {
+        return false;
+    }
+    $format = 'Y-m-d';
+    $d = DateTime::createFromFormat($format, $date);
+    return $d && $d->format($format) === $date;
+}
+
+/** ✅
+ * Determine if a string is a valid MySQL datetime string in the form YYYY-mm-dd HH:MM:SS.
+ * @param string $datetime A string to test.
+ * @return boolean true if the string is a valid MySQL datetime string in the form YYYY-mm-dd HH:MM:SS, otherwise false.
+ */
+function isValidMySQLDateTime($datetime) {
+    if (empty($datetime)) {
+        return false;
+    }
+    $format = 'Y-m-d H:i:s';
+    $d = DateTime::createFromFormat($format, $datetime);
+    return $d && $d->format($format) === $datetime;
+}
+
 /**
  * Determine if the color value is considered a dark color.
  * @param string $htmlHexColorValue An HTML color value such as #445566 or just 445566.
@@ -1756,10 +1990,10 @@ function isDarkColor ($htmlHexColorValue) {
 }
 
 /**
- * Convert an HTML color hex string into a key/value RGB array of decimal color values 0-255.
- * @param $hex
- * @param bool $alpha
- * @return mixed
+ * Convert an HTML color hex string into a key/value RGB array of decimal color values 0-255. A leading `#` is optional.
+ * @param string $hex An HTML color value in hex string format, either `rrggbb` or `rgb`
+ * @param boolean $alpha Optional alpha value.
+ * @return array
  */
 function hexToRgb($hex, $alpha = 1.0) {
     $hex      = str_replace('#', '', $hex);
@@ -1773,8 +2007,8 @@ function hexToRgb($hex, $alpha = 1.0) {
 
 /**
  * Convert an RGB color array into it HTML hex string equivalent.
- * @param $rgb {array}
- * @return string
+ * @param array $rgb A key/value array.
+ * @return string A hex color value string.
  */
 function rgbToHex($rgb) {
     if (isset($rgb['r']) && isset($rgb['g']) && isset($rgb['b'])) {
@@ -1785,11 +2019,11 @@ function rgbToHex($rgb) {
     return '#000000';
 }
 
-/**
+/** ✅
  * @function: ageFromDate: Determine age (number of years) since date.
- * @param {date} Date to calculate age from.
- * @param {date} Date to calculate age to, default is today.
- * @return int number of years from date to today.
+ * @param string|integer $checkDate to calculate age from.
+ * @param string|integer $referenceDate to calculate age to, default is today.
+ * @return integer number of years from date to today.
  */
 function ageFromDate ($checkDate, $referenceDate = null) {
     $timestamp = strtotime($checkDate);
@@ -1809,20 +2043,20 @@ function ageFromDate ($checkDate, $referenceDate = null) {
 // Session services: session functions deal with logged in users.
 // =================================================================
 
-/**
+/** ✅
  * Generate a time stamp for the current time rounded to the nearest SESSION_DAYSTAMP_HOURS hour.
  * This is used for access tokens as they are short-lived.
- * @return int
+ * @return integer A integer representing a point in time.
  */
 function sessionDayStamp () {
     return floor(time() / (SESSION_DAYSTAMP_HOURS * 60 * 60));
 }
 
-/**
+/** ✅
  * Generate a (hopefully) unique site mark. This is a pseudo-user-id to accommodate anonymous users who
  * use the site and we need to generate a unique session id on their behalf and not have it clash with
  * any other anonymous user on the site in this day-stamp window of time.
- * @return int A mock user-id. Should be a minimum of 6 digits.
+ * @return integer A mock user-id. Should be a minimum of 6 digits.
  */
 function makeSiteMark() {
     return mt_rand(187902, mt_getrandmax());
@@ -1830,7 +2064,7 @@ function makeSiteMark() {
 
 /**
  * Return the HTTP authorization headers. This is where we expect to find our authentication token.
- * @return {string|null} The authorization header, or null if it was not sent in this request.
+ * @return string|null The authorization header, or null if it was not sent in this request.
  */
 function getAuthorizationHeader () {
     $headers = null;
@@ -1852,7 +2086,7 @@ function getAuthorizationHeader () {
 
 /**
  * Find and return the Bearer token supplied in the HTTP request, if it's there.
- * @return {string|null} the HTTP bearer token or null if it was not sent.
+ * @return string|null the HTTP bearer token or null if it was not sent.
  */
 function getBearerTokenInRequest() {
     $headers = getAuthorizationHeader();
@@ -1886,6 +2120,16 @@ function sessionGetLanguageCode () {
 //	General utilities and helper functions:
 // =================================================================
 
+/**
+ * When a client sends an image file as a POST request, save the file. Required POST parameters
+ * are:
+ *   `width`: Width of the image.
+ *   `height`: Height of the image.
+ *   `px`: Array of pixel values that should match width * height.
+ * @param string $saveItHere The file path on disk where to save this image file.
+ * @param string $imageType The type of file we are expecting.
+ * @return boolean True if successfully saved, false if error.
+ */
 function imageFileReceive ($saveItHere, $imageType) {
     $rc = false;
     if (isset($_POST['width']) && isset($_POST['height'])) {
@@ -1924,11 +2168,11 @@ function imageFileReceive ($saveItHere, $imageType) {
     return $rc;
 }
 
-/**
+/** ✅
  * Parse a string of tags into individual tags array, making sure each tag is properly formatted.
  * A tag must be at least 1 character and no more than 50, without any leading or trailing whitespace,
  * and without any HTML tags (entities should be OK.)
- * @param $tags string of tags to consider.
+ * @param string $tags string of tags to consider.
  * @param string $delimiter how each tag in the input string is separated.
  * @return array individual tags, null if there are no tags.
  */
@@ -1952,8 +2196,8 @@ function tagParse ($tags, $delimiter = ';') {
 
 /**
  * Delete all files in a directory then remove the directory.
- * @param $directory
- * @return bool
+ * @param string $directory Path on disk to a director.
+ * @return boolean True if successful, false if error.
  */
 function directoryDelete ($directory) {
     $rc = false;
@@ -1981,22 +2225,22 @@ function directoryDelete ($directory) {
     return $rc;
 }
 
-/**
+/** ✅
  * Return the file extension from a file name. Or, more precisely, return everything after the last
- * . character in a string.
- * @param $fileName
- * @return string
+ * `.` character in a string.
+ * @param string $fileName File name to consider.
+ * @return string File extension.
  */
 function getExtension ($fileName) {
     $ext = '';
     $i = strrpos($fileName, '.');
-    if ($i >= 0) {
+    if ($i !== false) {
         $ext = substr($fileName, $i + 1, strlen($fileName) - $i);
     }
     return $ext;
 }
 
-/**
+/** ✅
  * Return a local file path to a resource given its URL.
  * @param string $url any URL that should be valid on the current site.
  * @return string A file path to that resource.
@@ -2014,10 +2258,10 @@ function urlToFilePath ($url) {
     return $filePath;
 }
 
-/**
+/** ✅
  * Generate a random string of base64 characters of the requested length. I have no
  * idea where this algorithm came from or how effective it is.
- * @param int $length
+ * @param integer $length How long to make the token.
  * @return string The requested string length of characters [/0-9A-Za-z\-\.]+/
  */
 function makeRandomToken ($length = 12) {
@@ -2043,37 +2287,48 @@ function makeRandomToken ($length = 12) {
     return $token;
 }
 
-/**
+/** ✅
  * Append a URL parameter if the value is not empty.
  *
- * @param string The URL string to update. This string updated if the value is not empty.
- * @param string A key.
- * @param string The value to assign to the key.
- * @return string the update URL string.
+ * @param string $params The URL string to update. This string is updated if the value is not empty.
+ * @param string $key A key.
+ * @param string $value The value to assign to the key.
+ * @return string the updated URL string.
  */
 function appendParamIfNotEmpty( & $params, $key, $value) {
     if ( ! empty($key) && ! empty($value)) {
-        $params .= '&' . $key . '=' . $value;
+        if (strlen($params) > 0) {
+            $hasQuery = str_contains($params, '?');
+            $hasParams = str_contains($params, '&');
+            $hasOneParam = str_contains($params, '=');
+            if ( ! $hasQuery && ! $hasParams && ! $hasOneParam) {
+                $params .= '?';
+            } elseif ($hasQuery || $hasParams || $hasOneParam) {
+                $params .= '&';
+            }
+        }
+        $params .= $key . '=' . urlencode($value);
     }
     return $params;
 }
 
-/**
+/** ✅
  * If the flag parameter is determined to be true (implicit cast to bool) then return a checkbox string.
- * @param boolean True for checked, false for not checked.
+ * @param boolean $flag True for checked, false for not checked.
  * @return string Checked or empty.
  */
 function showBooleanChecked($flag) {
     return $flag ? 'checked' : '';
 }
 
-/**
+/** ✅
  * Render a PHP key/value associative array into JavaScript code
- * that produces a similar object.
- * @param object The associated k/v array.
- * @param string The name of the javascript variable to use. if not provided will default to "parameters".
+ * that produces a similar object. This is used on a PHP page to render JavaScript code
+ * inside a `<script>` tag.
+ * @param object $parameters The associated k/v array.
+ * @param string $varName The name of the javascript variable to use. if not provided will default to "parameters".
  */
-function arrayToJavaScriptObject ($parameters, $varName) {
+function arrayToJavaScriptObject ($parameters, $varName, $isTest = false) {
     if (empty($varName)) {
         $varName = 'parameters';
     }
@@ -2082,10 +2337,14 @@ function arrayToJavaScriptObject ($parameters, $varName) {
         $javaScriptCode .= "        $property: \"$value\",\n";
     }
     $javaScriptCode .= "    };\n";
-    echo($javaScriptCode);
+    if ($isTest) {
+        return $javaScriptCode;
+    } else {
+        echo($javaScriptCode);
+    }
 }
 
-/**
+/** ✅
  * Pack a unique object identifier site-id, content-type-id, and object-id.
  * The content id is a sequence of base 36 numbers, and we convert the base 36 characters to uppercase
  * to maintain compatibility between PHP and MySQL.
@@ -2109,7 +2368,7 @@ function contentIdPack($site_id, $content_type_id, $object_id) {
     return strtoupper($content_id);
 }
 
-/**
+/** ✅
  * Unpack a content identifier into it parts: site-id, content-type-id, and object-id.
  * @param string $content_id A content identifier to unpack.
  * @param integer $site_id The object's site-id.
@@ -2145,7 +2404,7 @@ function contentIdUnpack($content_id, & $site_id, & $content_type_id, & $object_
 
 /**
  * Log a message to the logging utility.
- * @param string Message to log.
+ * @param string $message Message to log.
  */
 function debugLog($message) {
     global $enginesisLogger;
@@ -2154,7 +2413,7 @@ function debugLog($message) {
 
 /**
  * Log an informational message to the logging utility.
- * @param string Message to log.
+ * @param string $message Message to log.
  */
 function debugInfo($message) {
     global $enginesisLogger;
@@ -2164,7 +2423,7 @@ function debugInfo($message) {
 
 /**
  * Log an error message to the logging utility.
- * @param string Message to log.
+ * @param string $message Message to log.
  */
 function debugError($message) {
     global $enginesisLogger;
@@ -2173,25 +2432,28 @@ function debugError($message) {
 
 /**
  * Return a printable version of a variable, array, or object.
- * @param Any $value Any PHP variable to consider.
+ * @param mixed $value Any PHP variable to consider.
  * @return string A string representation of $value.
  */
 function debugToString($value) {
     return json_encode($value);
 }
 
-/**
+/** ✅
  * Return a string of parameter key/value pairs, but remove any sensitive information from the output.
- * @param Array An array or object of key/value pairs to log.
+ * @param array $parameters An array or object of key/value pairs to log.
  * @return string A string representation of the parameters.
  */
 function logSafeParameters($parameters) {
-    $sensitiveParameters = ['authtok', 'authtoken', 'token', 'refresh_token', 'password', 'secondary_password', 'apikey', 'developer_key'];
     $logParams = '';
     if (is_array($parameters) && count($parameters) > 0) {
+        $sensitiveParameters = ['authtok', 'authtoken', 'token', 'refresh_token', 'password', 'secondary_password', 'apikey', 'developer_key'];
         foreach ($parameters as $key => $value) {
             if (in_array($key, $sensitiveParameters)) {
                 $value = 'XXXXX';
+            }
+            if (is_array($value)) {
+                $value = json_encode($value);
             }
             $logParams .= (strlen($logParams) > 0 ? ', ' : 'parameters: ') . $key . '=' . $value;
         }

@@ -1,7 +1,7 @@
 {
     "name": "puttputtplanet",
     "type": "module",
-    "version": "1.0.12",
+    "version": "1.0.13",
     "description": "Putt Putt Planet website",
     "main": "bin/build.js",
     "scripts": {
@@ -11,12 +11,12 @@
         "deploy": "node bin/deploy.js --config=bin/deploy-config.json",
         "lint": "npm exec -- eslint ./public/js/*.js",
         "test": "jest test",
-        "updatedependencies": "node ../../libraries/npm-check-updates/build/cli.js -u",
-        "ud": "node ../../libraries/npm-check-updates/build/cli.js -u",
+        "updatedependencies": "npx npm-check-updates -u",
+        "ud": "npm run updatedependencies",
         "updatemodules": "node ./bin/updateModules.js",
-        "um": "node ./bin/updateModules.js",
+        "um": "npm run updatemodules",
         "versionup": "node bin/versionUp.js --debug --task build --path ./",
-        "vu": "node bin/versionUp.js --debug --task build --path ./"
+        "vu": "npm run versionup"
     },
     "repository": {
         "type": "git",
@@ -38,13 +38,13 @@
     "homepage": "https://puttputtplanet.com",
     "devDependencies": {
         "async": "^3.2.6",
-        "axios": "^1.16.1",
+        "axios": "^1.18.0",
         "chalk": "^5.6.2",
         "cheerio": "^1.2.0",
         "clean-css": "5.3.3",
-        "eslint": "^9.39.4",
+        "eslint": "^10.5.0",
         "fs-extra": "^11.3.5",
-        "glob": "^11.1.0",
+        "glob": "^13.0.6",
         "gulp-rename": "^2.1.0",
         "imagemin": "^9.0.1",
         "jest": "^30.4.2",
