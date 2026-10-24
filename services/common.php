@@ -2194,6 +2194,24 @@ function tagParse ($tags, $delimiter = ';') {
     return $tagList;
 }
 
+/** ✅
+ * Make sure a proposed path does not break out of the website file system.
+ * @param string $path A proposed path to check.
+ * @return string A clean path.
+ */
+function sanitizePath($path) {
+    // Standardize Windows backslashes to forward slashes
+    $path = str_replace('\\', '/', $path);
+
+    // Repeatedly remove '../' until none remain
+    do {
+        $clean = $path;
+        $path = str_replace('../', '', $path);
+    } while ($clean !== $path);
+
+    return $path;
+}
+
 /**
  * Delete all files in a directory then remove the directory.
  * @param string $directory Path on disk to a director.

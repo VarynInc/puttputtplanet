@@ -11,7 +11,7 @@
  **/
 
 const enginesis = {
-    VERSION: "2.12.6",
+    VERSION: "2.12.7",
     debugging: true,
     disabled: false, // use this flag to turn off communicating with the server
     isOnline: true,  // flag to determine if we are currently able to reach Enginesis servers
@@ -2935,7 +2935,7 @@ export default {
             }
         }
         if (gameName == "quiz" || gameName.substring(0, 5) == "quiz_") {
-            gameName = "quiz/" + (parameters.game_id || enginesis.gameInfo.game_id);
+            gameName = "quiz/" + (parameters.game_id || enginesis.gameId || enginesis.gameInfo.game_id);
         }
         imagePath += gameName + "/images/";
         if (isEmpty(width) || width == "*") {

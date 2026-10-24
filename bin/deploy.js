@@ -49,7 +49,7 @@ function loadConfigurationData(configurationFilePath) {
     if (fs.existsSync(configurationFilePath)) {
         let rawData = fs.readFileSync(configurationFilePath);
         if (rawData != null) {
-            return JSON.parse(rawData) || {};  
+            return JSON.parse(rawData) || {};
         } else {
             immediateLog(configurationFilePath + " has no data", true);
         }
@@ -330,7 +330,7 @@ function deploy(configuration) {
         .shell(sshCommand)
         .flags(rsyncFlags)
         .delete()
-        .set("exclude-from", excludeFiles)
+        .set("filter", `merge ${excludeFiles}`)
         .source(sourcePath)
         .destination(destinationPath);
 

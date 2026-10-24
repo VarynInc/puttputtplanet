@@ -63,6 +63,6 @@ require_once '../services/common.php';
             </div>
         </div>
     </div>
-    <script src="js/bootstrap.bundle.min.js" async></script>
+    <script src="js/lib/bootstrap.bundle.min.js" async></script>
 </body>
 </html>

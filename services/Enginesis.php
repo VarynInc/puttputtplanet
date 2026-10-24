@@ -667,7 +667,7 @@ class Enginesis {
         } elseif (preg_match('/-[dlqx]\./i', $hostName, $matchedStage)) {
             $targetPlatform = substr($matchedStage[0], 0, 2);
         }
-        return $targetPlatform;
+        return strtolower($targetPlatform);
     }
 
     /**

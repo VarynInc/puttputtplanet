@@ -16,9 +16,7 @@ import fsExtra from "fs-extra";
 import { minify } from "terser";
 import args from "yargs";
 import CleanCSS from "clean-css";
-import ImageMin from "imagemin";
-import imageminJpegtran from "imagemin-jpegtran";
-import imageminPngquant from "imagemin-pngquant";
+import shelljs from "shelljs";
 import jspackage from "../package.json" with { type: "json" };
 const version = jspackage.version;
 
@@ -45,18 +43,14 @@ let configuration = {
     packageName: "puttputtplanet.min.js",
     configurationFile: null,
     jsSource: "./public/js",
-    jsDestination: "./distrib/js",
-    imageSource: "./public/images",
-    imageDestination: "./distrib/images",
+    jsDestination: "./public/js",
     exclude: null,
-    imagesGlobSpec: "{jpg,jpeg,png,gif}",
-    unoptimizedFileSpec: "{eot,ttf,woff,woff2,svg,mp3,ogg,wav,json}",
+    unoptimizedFileSpec: "{eot,ttf,woff,woff2,svg,mp3,ogg,wav,json,jpg,jpeg,png,gif}",
     pageManifest: {
     },
     libManifest: [
         "bootstrap.bundle.min.js",
         "enginesis.js",
-        "ShareHelper.js",
         "commonUtilities.js"
     ],
     filesToCopy: [ // a list of files to copy to destination without modification
@@ -68,7 +62,6 @@ let configuration = {
     ],
     libsToCombine: [
         "commonUtilities.js",
-        "ShareHelper.js",
         "enginesis.js"
     ],
     combinedLibFileName: "enginesis.min.js"
@@ -107,12 +100,6 @@ function logError(message) {
             demandOption: false,
             default: "./bin/build-config.json"
         },
-        "imageDestination": {
-            alias: "a",
-            type: "string",
-            describe: "copy compressed image files to specified path",
-            demandOption: false
-        },
         "jsDestination": {
             alias: "d",
             type: "string",
@@ -125,22 +112,10 @@ function logError(message) {
             describe: "path to log file",
             demandOption: false
         },
-        "imageSource": {
-            alias: "b",
-            type: "string",
-            describe: "set the source file root folder for image files",
-            demandOption: false
-        },
         "jsSource": {
             alias: "s",
             type: "string",
             describe: "set the source file root folder for .js files",
-            demandOption: false
-        },
-        "optimizeImages": {
-            alias: "i",
-            type: "boolean",
-            describe: "optimize image files",
             demandOption: false
         },
         "verbose": {
@@ -203,7 +178,7 @@ function loadConfigurationData(configurationFilePath) {
  * @param {object} configurationProperties A set of command line parameters we got from the command line.
  */
 function matchProperties(configurationProperties) {
-    const configurableProperties = ["imageDestination", "jsDestination", "dryrun", "exclude", "logfile", "optimizeImages", "imageSource", "jsSource", "verbose"];
+    const configurableProperties = ["jsDestination", "dryrun", "exclude", "logfile", "jsSource", "verbose"];
     configurableProperties.forEach(function(property) {
         if (configurationProperties.hasOwnProperty(property)) {
             logInfo(">>> Setting ." + property + " to " + configurationProperties[property]);
@@ -245,126 +220,6 @@ function updateConfiguration() {
         } else {
             logInfo("ᙘ no config?");
         }
-    });
-}
-
-/**
- * Optimize all image files found in sourcePath and copy the optimized version to destinationPath.
- * @param {string} sourcePath path to the root folder under which to find images. Image files are jpg, jpeg, png, gif, svg.
- * @param {string} destinationPath path where to copy optimized files.
- * @param {string} imagesGlobSpec which file extensions to copy.
- * @returns {Promise} Resolves when all images are complete.
- */
-function optimizeImages(sourcePath, destinationPath, imagesGlobSpec) {
-    const globSpec = path.join(sourcePath, "/**/") + "*." + imagesGlobSpec;
-    const sourcePathLength = sourcePath.length - 1;
-    let totalBytesConsidered = 0;
-    let totalBytesCopied = 0;
-    let totalFilesCopied = 0;
-
-    return new Promise(async function (resolve, reject) {
-        logInfo("ᗘ Starting image optimization for " + globSpec);
-        const files = await glob(globSpec);
-        asyncp.eachLimit(files, numberOfCPUs, function (file, callback) {
-            const destinationFile = path.join(destinationPath, file.substring(sourcePathLength));
-
-            (async function() {
-                const minifiedFileInfo = await ImageMin([file], {
-                    destination: path.dirname(destinationFile),
-                    plugins: [
-                        imageminJpegtran(),
-                        imageminPngquant({
-                            quality: [0.6, 0.8]
-                        })
-                    ]
-                });
-                fsExtra.stat(file, function (fstatError, fileStat) {
-                    if (fstatError) {
-                        logError(file + " -- fstat error " + fstatError.toString());
-                    } else {
-                        const originalFileSize = fileStat.size;
-                        const optimizedFileSize = minifiedFileInfo[0].data.length;
-                        const bytesSaved = originalFileSize - optimizedFileSize;
-                        let statusMessage;
-                        totalFilesCopied += 1;
-                        totalBytesConsidered += originalFileSize;
-                        totalBytesCopied += optimizedFileSize;
-                        if (bytesSaved > 9) {
-                            statusMessage = chalk.green("saved " + prettyBytes(bytesSaved) + " (" + (((originalFileSize - optimizedFileSize) / originalFileSize) * 100).toFixed() + "%)");
-                        } else {
-                            statusMessage = chalk.yellow("was optimized");
-                        }
-                        logInfo(chalk.green("ᗘ ") + chalk.gray(file + " -- copy to " + destinationFile) + " -- " + statusMessage);
-                    };
-                });
-                callback(null);
-            })();
-        }, function (error) {
-            compressionStats.totalFiles += totalFilesCopied;
-            compressionStats.totalBytesConsidered += totalBytesConsidered;
-            compressionStats.totalBytesCompressed += totalBytesCopied;
-            compressionStats.endTime = new Date();
-            if (error) {
-                reject(new Error("optimizeImages process error " + error.toString()));
-            } else {
-                const totalSaved = totalBytesConsidered - totalBytesCopied;
-                const percentSaved = totalBytesConsidered == 0 ? 0 : ((totalSaved / totalBytesConsidered) * 100).toFixed() + "%";
-                logInfo(chalk.green("ᙘ Completed image optimization for " + totalFilesCopied + " files, saved " + prettyBytes(totalSaved) + " " + percentSaved));
-                resolve();
-            }
-        });
-    });
-}
-
-/**
- * Copy images without optimizing them.
- * @param {string} sourcePath path to the root folder under which to find images. Image files are jpg, jpeg, png, gif, svg.
- * @param {string} destinationPath path where to copy optimized files.
- * @param {string} imagesGlobSpec which file extensions to copy.
- * @returns {Promise} A promise that resolves when the image files are copied to the destination folder, or rejects if there is an error.
- */
-async function copyImages(sourcePath, destinationPath, imagesGlobSpec) {
-    const globSpec = path.join(sourcePath, "/**/") + "*." + imagesGlobSpec;
-    const sourcePathLength = sourcePath.length - 1;
-    let totalBytesConsidered = 0;
-    let totalBytesCopied = 0;
-    let totalFilesCopied = 0;
-
-    return new Promise(async function (resolve, reject) {
-        logInfo(chalk.green("ᗘ Starting image copy with " + globSpec + " to " + destinationPath));
-        const files = await glob(globSpec);
-        asyncp.eachLimit(files, numberOfCPUs, function (file, callback) {
-            const destinationFile = path.join(destinationPath, file.substring(sourcePathLength));
-            fsExtra.stat(file, function (error, fileStat) {
-                const newPath = path.dirname(destinationFile);
-                if (error) {
-                    logError(file + " -- fstat error " + error.toString());
-                    callback(error);
-                    return;
-                }
-                if ( ! fsExtra.existsSync(newPath)) {
-                    fsExtra.mkdirSync(newPath);
-                }
-                fsExtra.copyFileSync(file, destinationFile);
-                totalFilesCopied += 1;
-                const originalFileSize = fileStat.size;
-                totalBytesConsidered += originalFileSize;
-                totalBytesCopied += originalFileSize;
-                logInfo(chalk.green("ᗘ ") + chalk.gray(file + " -- copy to " + destinationFile));
-                callback(null);
-            });
-        }, function (error) {
-            compressionStats.totalFiles += totalFilesCopied;
-            compressionStats.totalBytesConsidered += totalBytesConsidered;
-            compressionStats.totalBytesCompressed += totalBytesCopied;
-            compressionStats.endTime = new Date();
-            if (error) {
-                reject(new Error("copyImages process error " + error.toString()));
-            } else {
-                logInfo(chalk.green("ᙘ Completed image copy for " + totalFilesCopied + " files, total " + prettyBytes(totalBytesCopied)));
-                resolve();
-            }
-        });
     });
 }
 
@@ -516,7 +371,7 @@ function optimizeJS(varynConfiguration) {
     }
 
     return new Promise(function (resolve) {
-        logInfo("ᗘ Starting JavaScript optimization for Varyn app files");
+        logInfo("ᗘ Starting JavaScript optimization for PuttPuttPlanet app files");
         for (const fileGroup in fileGroups) {
             const fileList = fileGroups[fileGroup];
             const fileParts = path.parse(fileList[fileList.length - 1]);
@@ -541,7 +396,7 @@ async function optimizeJSLibs(varynConfiguration) {
     let totalBytesConsidered = 0;
     let terserCode = {};
     const sourcePath = varynConfiguration.jsSource;
-    const destinationPath = varynConfiguration.jsDestination;
+    const destinationPath = varynConfiguration.jsDestination + "/lib/";
     const terserOptions = {
         warnings: true,
         toplevel: false
@@ -557,7 +412,7 @@ async function optimizeJSLibs(varynConfiguration) {
         fsExtra.ensureDir(destinationPath)
         .then(function () {
             asyncp.map(varynConfiguration.libsToCopy, function (file) {
-                const fileName = path.join(sourcePath, file);
+                const fileName = path.join(sourcePath, "lib", file);
                 fsExtra.stat(fileName, function (error, fileStat) {
                     if (error) {
                         throw (new Error("optimizeJSLibs fstat error -- " + fileName + ":  " + error.toString()));
@@ -582,7 +437,7 @@ async function optimizeJSLibs(varynConfiguration) {
         .then(function (result) {
             const destinationFile = path.join(destinationPath, varynConfiguration.combinedLibFileName);
             varynConfiguration.libsToCombine.forEach(function (file) {
-                const fileName = path.join(sourcePath, file);
+                const fileName = path.join(sourcePath, "lib", file);
                 const fileContents = fsExtra.readFileSync(fileName, { encoding: "utf8", flag: "r" });
                 if (fileContents != null && fileContents.length > 0) {
                     compressionStats.totalFiles++;
@@ -620,19 +475,6 @@ async function optimizeJSLibs(varynConfiguration) {
 }
 
 /**
- * Determine how to handle image files: either optimize and copy or just copy. Returns a Promise.
- * @param {object} varynConfiguration Configuration properties.
- * @returns {Promise} A promise that resolves once the images are optimized and copied, or rejects if there is an error.
- */
-function handleImages(varynConfiguration) {
-    if (varynConfiguration.optimizeImages) {
-        return optimizeImages(varynConfiguration.imageSource, varynConfiguration.imageDestination, varynConfiguration.imagesGlobSpec);
-    } else {
-        return copyImages(varynConfiguration.imageSource, varynConfiguration.imageDestination, varynConfiguration.imagesGlobSpec);
-    }
-}
-
-/**
  * Display end of build statistics.
  */
 function showStats() {
@@ -641,6 +483,20 @@ function showStats() {
     const bytesSaved = compressionStats.totalBytesConsidered - compressionStats.totalBytesCompressed;
     const bytesRatio = ((bytesSaved / compressionStats.totalBytesConsidered) * 100).toFixed();
     logInfo(chalk.green("ᙘ Completed build version " + version + " in " + dateDiff + "s: " + compressionStats.totalFiles + " files, originally " + prettyBytes(compressionStats.totalBytesConsidered) + ", now " + prettyBytes(compressionStats.totalBytesCompressed) + " saving " + prettyBytes(bytesSaved) + " (" + bytesRatio + "%)."));
+}
+
+function updateBuildInfoFile() {
+    const buildFileName = 'build-info.json';
+    const buildFolder = './public';
+    const buildFile = path.join(buildFolder, buildFileName);
+    const currentDateTime = new Date().toLocaleString();
+    const buildInfo = {
+            site: process.env.npm_package_name,
+            version: process.env.npm_package_version,
+            publish_date: currentDateTime,
+            user: process.env.USER
+        };
+    shelljs.echo(JSON.stringify(buildInfo)).to(buildFile);
 }
 
 /**
@@ -655,8 +511,9 @@ function runBuild() {
         optimizeJS(configuration),
         optimizeJSLibs(configuration),
         // optimizeHTML(configuration), // HTML is not working as of 2-Feb-2025
-        handleImages(configuration)
     ]).then(function (result) {
+        updateBuildInfoFile();
+        compressionStats.endTime = new Date();
         logInfo("ᙘ All builds complete");
         showStats(result);
     }).catch(function (error) {
@@ -667,10 +524,9 @@ function runBuild() {
 updateConfiguration()
 .then(function() {
     if (configuration.isLoggingInfo) {
-        const optimize = configuration.optimizeImages ? "Yes" : "No";
         const compressMangle = (configuration.isCompressJavaScript ? "Yes" : "No") + "/" + (configuration.isMangleJavaScript ? "Yes" : "No");
         const logging = configuration.isLoggingInfo ? "Yes" : "No";
-        logInfo("ᙘ Running build for version " + version + " with optimizeImages=" + optimize + "; JS compress/mangle=" + compressMangle + "; logging=" + logging);
+        logInfo("ᙘ Running build for version " + version + " with JS compress/mangle=" + compressMangle + "; logging=" + logging);
     }
     runBuild();
 });

@@ -14,7 +14,7 @@
  */
 
 export default {
-    version: "1.7.8",
+    version: "1.7.10",
     _base64KeyStr: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
     _testNumber: 0,
 
@@ -38,8 +38,6 @@ export default {
             return false;
         }
         let hasSupport = false;
-        let storage;
-        let testKey;
 
         if (storageType === undefined || storageType == null || storageType == "") {
             storageType = "localStorage";
@@ -48,8 +46,8 @@ export default {
             hasSupport = storageType in window && window[storageType] !== null;
             if (hasSupport && robustCheck) {
                 // even if "supported" make sure we can write and read from it
-                storage = window[storageType];
-                testKey = "commonUtilities";
+                const storage = window[storageType];
+                const testKey = "commonUtilities";
                 storage.setItem(testKey, "1");
                 storage.removeItem(testKey);
             }
@@ -227,22 +225,15 @@ export default {
      * @returns {object}
      */
     extendObject: function() {
-        var key,
-            value,
-            extendedObject,
-            object,
-            objects,
-            index,
-            objectCount;
-
+        let extendedObject;
         if (arguments.length > 0) {
             extendedObject = arguments[0];
             if (arguments.length > 1) {
-                objects = arguments.slice(1);
-                for (index = 0, objectCount = objects.length; index < objectCount; index ++) {
-                    object = objects[index];
-                    for (key in object) {
-                        value = object[key];
+                const objects = Array.prototype.slice.call(arguments, 1);
+                for (let index = 0, objectCount = objects.length; index < objectCount; index ++) {
+                    const object = objects[index];
+                    for (const key in object) {
+                        const value = object[key];
                         extendedObject[key] = value;
                     }
                 }
@@ -287,6 +278,38 @@ export default {
             accumulator[value] = (accumulator[value] || 0) + 1;
             return accumulator;
         }, {});
+    },
+
+    /**
+     * Determine if the contents of two arrays are equal, item by item.
+     * Will not discern objects: two different object instances will never be equal: {x:20} != {x:20}
+     *
+     * @param {array} array1 First array to check for equality.
+     * @param {array} array2 Second array to check for equality.
+     * @returns {boolean} True if the two arrays are considered equal
+     */
+    arrayEqual: function (array1, array2) {
+        let isEqual = true;
+
+        // if the other array is a falsey value, return
+        if ( ! array1 || ! array2 || ! Array.isArray(array1) || ! Array.isArray(array2) || array1.length !== array2.length) {
+            isEqual = false;
+        } else {
+            for (let i = 0, l = array1.length; i < l; i += 1) {
+                // Check if we have nested arrays
+                if (Array.isArray(array1[i]) && Array.isArray(array2[i])) {
+                    // recurse into the nested arrays
+                    if ( ! this.arrayEqual(array1[i], array2[i])) {
+                        isEqual = false;
+                        break;
+                    }
+                } else if (array1[i] !== array2[i]) {
+                    isEqual = false;
+                    break;
+                }
+            }
+        }
+        return isEqual;
     },
 
     /**
