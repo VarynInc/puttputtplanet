@@ -8,7 +8,8 @@ import Rsync from "rsync";
 import chalk from "chalk";
 import fs from "fs";
 import path from "path";
-import shelljs from "shelljs";
+import shell from "shelljs";
+import { execSync } from "node:child_process";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
@@ -26,6 +27,8 @@ const configurationDefault = {
     site: "puttputtplanet",
     targetstage: "-q",
     isDryRun: true,
+    buildFileName: 'build-info.json',
+    buildFolder: './public',
     destinationHost: "",
     destinationUser: "",
     destinationPassword: "",
@@ -275,18 +278,26 @@ function immediateLog(message, error = true) {
     writeToLogFile(message);
 }
 
-function updateBuildInfoFile() {
-    const buildFileName = 'build-info.json';
-    const buildFolder = './public';
+/**
+ * Update the build info and save it in a JSON file.
+ * @param {string} buildFolder Destination folder to save file.
+ * @param {string} buildFileName File name to use.
+ */
+function updateBuildInfoFile(buildFolder, buildFileName) {
     const buildFile = path.join(buildFolder, buildFileName);
-    const currentDateTime = new Date().toLocaleString();
+    let gitHeadHash = "";
+    try {
+        gitHeadHash = execSync("git rev-parse HEAD", { encoding: "utf-8" });
+    } catch (error) {
+        console.error(chalk.red("Could not read git hash", error.message));
+    }
     const buildInfo = {
-            site: process.env.npm_package_name,
-            version: process.env.npm_package_version,
-            publish_date: currentDateTime,
-            user: process.env.USER
-        };
-    shelljs.echo(JSON.stringify(buildInfo)).to(buildFile);
+        packageName: shell.env['npm_package_name'],
+        version: shell.env['npm_package_version'],
+        publish_date: (new Date()).toISOString(),
+        commit: gitHeadHash
+    };
+    shell.echo(JSON.stringify(buildInfo)).to(buildFile);
 }
 
 function deploy(configuration) {
@@ -311,7 +322,7 @@ function deploy(configuration) {
         rsyncFlags += dryRunFlag;
         logMessage += " -- This is a DRY RUN - no files will be copied.";
     } else {
-        updateBuildInfoFile();
+        updateBuildInfoFile(configuration.buildFolder, configuration.buildFileName);
     }
     if (configuration.sshKeyFile) {
         sshCommand += " -i " + configuration.sshKeyFile;

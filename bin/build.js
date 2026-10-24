@@ -16,7 +16,8 @@ import fsExtra from "fs-extra";
 import { minify } from "terser";
 import args from "yargs";
 import CleanCSS from "clean-css";
-import shelljs from "shelljs";
+import shell from "shelljs";
+import { execSync } from "node:child_process";
 import jspackage from "../package.json" with { type: "json" };
 const version = jspackage.version;
 
@@ -37,6 +38,8 @@ let configuration = {
     isLoggingError: true,
     isCompressJavaScript: true,
     isMangleJavaScript: true,
+    buildFileName: 'build-info.json',
+    buildFolder: './public',
     logfile: null,
     verbose: true,
     optimizeImages: true,
@@ -485,18 +488,26 @@ function showStats() {
     logInfo(chalk.green("ᙘ Completed build version " + version + " in " + dateDiff + "s: " + compressionStats.totalFiles + " files, originally " + prettyBytes(compressionStats.totalBytesConsidered) + ", now " + prettyBytes(compressionStats.totalBytesCompressed) + " saving " + prettyBytes(bytesSaved) + " (" + bytesRatio + "%)."));
 }
 
-function updateBuildInfoFile() {
-    const buildFileName = 'build-info.json';
-    const buildFolder = './public';
+/**
+ * Update the build info and save it in a JSON file.
+ * @param {string} buildFolder Destination folder to save file.
+ * @param {string} buildFileName File name to use.
+ */
+function updateBuildInfoFile(buildFolder, buildFileName) {
     const buildFile = path.join(buildFolder, buildFileName);
-    const currentDateTime = new Date().toLocaleString();
+    let gitHeadHash = "";
+    try {
+        gitHeadHash = execSync("git rev-parse HEAD", { encoding: "utf-8" });
+    } catch (error) {
+        console.error(chalk.red("Could not read git hash", error.message));
+    }
     const buildInfo = {
-            site: process.env.npm_package_name,
-            version: process.env.npm_package_version,
-            publish_date: currentDateTime,
-            user: process.env.USER
-        };
-    shelljs.echo(JSON.stringify(buildInfo)).to(buildFile);
+        packageName: shell.env['npm_package_name'],
+        version: shell.env['npm_package_version'],
+        publish_date: (new Date()).toISOString(),
+        commit: gitHeadHash
+    };
+    shell.echo(JSON.stringify(buildInfo)).to(buildFile);
 }
 
 /**
@@ -512,7 +523,7 @@ function runBuild() {
         optimizeJSLibs(configuration),
         // optimizeHTML(configuration), // HTML is not working as of 2-Feb-2025
     ]).then(function (result) {
-        updateBuildInfoFile();
+        updateBuildInfoFile(configuration.buildFolder, configuration.buildFileName);
         compressionStats.endTime = new Date();
         logInfo("ᙘ All builds complete");
         showStats(result);

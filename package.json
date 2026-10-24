@@ -1,7 +1,7 @@
 {
     "name": "puttputtplanet",
     "type": "module",
-    "version": "1.0.15",
+    "version": "1.0.16",
     "description": "Putt Putt Planet website",
     "main": "bin/build.js",
     "scripts": {

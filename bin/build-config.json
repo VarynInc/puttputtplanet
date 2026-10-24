@@ -1,0 +1,10 @@
+{
+    "config": "./bin/build-config.json",
+    "dryrun": false,
+    "logfile": "./data/logs/build.log",
+    "jsDestination": "./public/js",
+    "jsSource": "./public/js",
+    "buildFileName": "build-info.json",
+    "buildFolder": "./public",
+    "verbose": true
+}

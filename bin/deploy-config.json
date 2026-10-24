@@ -3,6 +3,8 @@
     "game": "111",
     "targetstage": "-q",
     "isDryRun": false,
+    "buildFileName": "build-info.json",
+    "buildFolder": "./public",
     "destinationHost": "ec2-35-167-207-113.us-west-2.compute.amazonaws.com",
     "destinationUser": "ubuntu",
     "destinationPassword": "",
